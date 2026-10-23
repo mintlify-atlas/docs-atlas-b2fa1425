@@ -1,0 +1,176 @@
+---
+title: "Bills and Payments: Track Your Smart Mess Spending"
+sidebarTitle: "Bills & Payments"
+description: "Understand your Smart Mess live bill, bill history, payment methods, receipt tracking, and how to submit or cancel a payment for owner confirmation."
+---
+
+Smart Mess does not collect money automatically — all payments flow directly between you and your mess owner. The Bills screen gives you a transparent, always-current view of what you owe, how much you have paid, and any credit remaining, while Payments lets you submit proof so the owner can record the receipt.
+
+---
+
+## Your Live Bill
+
+The live bill is calculated on demand every time you open it. Call `GET /billing/current` or simply open **Bills** in the app to see the latest figures.
+
+<Info>
+  The live bill covers your currently active subscription for today's date. If you want to check a specific plan's bill (for example a future subscription or a single-meal purchase), the endpoint accepts an optional `plan_id` query parameter.
+</Info>
+
+### Bill Formula
+
+```
+Final Amount = Base Price − Skip Deductions + Guest & Extra Costs
+```
+
+Each component is returned transparently in the response:
+
+| Field | Meaning |
+|---|---|
+| `base_amount` | The full subscription or single-meal price set by the owner |
+| `meal_price` | The per-meal deduction amount (set by owner per subscription) |
+| `skipped_meals` | Count of meals you have skipped under this subscription |
+| `deductions` | `meal_price × skips` (only skips without an extension credit apply) |
+| `extras_total` | Sum of guest meal costs and à la carte order totals |
+| `extra_lines` | Itemised breakdown of each à la carte order line |
+| `final_amount` | The net amount due after all adjustments |
+| `amount_paid` | Total of all owner-confirmed receipts against this plan |
+| `balance_due` | `max(final_amount − amount_paid, 0)` |
+| `credit` | `max(amount_paid − final_amount, 0)` |
+
+<Warning>
+  The bill never goes negative. If skip deductions would exceed the base price, `final_amount` is floored at ₹0.
+</Warning>
+
+---
+
+## Bill Snapshots (Generated Bills)
+
+When the owner is ready to collect payment, they generate an official bill snapshot. This snapshot is stored in the database and shown at the top of your **Bills** screen.
+
+<Tip>
+  If the owner generates the bill a second time without any change in base amount, deductions, or extras, the system reuses the existing snapshot rather than creating a duplicate. A new dated snapshot is only created when at least one amount has changed.
+</Tip>
+
+Bill snapshots appear in the response from `GET /billing/history`. Each entry contains the month, base amount, deductions, extras total, final amount, and payment status. The 15-second in-app notification poll alerts you as soon as a new snapshot is generated.
+
+---
+
+## Payment Methods
+
+Before you pay, check how your mess owner accepts payments:
+
+```
+GET /payments/methods
+```
+
+The response includes:
+
+| Field | Description |
+|---|---|
+| `qr_url` | URL of the owner's UPI QR image (PNG or JPEG, up to 5 MB) |
+| `upi_id` | Owner's UPI ID for manual entry |
+| `payee_name` | Name displayed on the UPI payment screen |
+| `instructions` | Owner's cash collection instructions |
+
+<CardGroup cols={2}>
+  <Card title="Scan & Pay (UPI)" icon="qrcode">
+    Open **Bills → Scan & pay**. The app displays the owner's QR code. Open any UPI app on your phone, scan the code, enter the amount, and complete the transfer externally. Then return to Smart Mess to submit your screenshot as proof.
+  </Card>
+  <Card title="Pay Cash" icon="money-bill">
+    Hand the cash to your owner in person. In **Bills → Pay cash**, submit the amount and a note. The owner records the receipt on their end; Smart Mess does not automatically mark cash as paid.
+  </Card>
+</CardGroup>
+
+---
+
+## Submitting Payment Proof
+
+<Steps>
+  <Step title="Open Bills and find the generated bill">
+    Bills shows the latest snapshot at the top. Confirm the final amount matches what you are paying.
+  </Step>
+  <Step title="Pay via QR or cash">
+    Use the QR code to complete a UPI transfer, or hand over cash to your owner directly. This step happens outside the app — no payment gateway is involved.
+  </Step>
+  <Step title="Submit your proof">
+    Tap **Submit payment**. Select the method (UPI screenshot or cash), enter the amount, and optionally upload the payment screenshot. Your submission enters a **Pending** state.
+  </Step>
+  <Step title="Owner reviews and confirms">
+    The owner sees your submission in their Payments panel. They can **Confirm received** or **Reject** it. A confirmed submission creates a `PaymentRecord` (receipt) and reduces your `balance_due`. A rejected submission can be resubmitted after correcting the details.
+  </Step>
+</Steps>
+
+<Warning>
+  Submitting a screenshot does **not** automatically mark the bill as paid. The owner must explicitly confirm receipt. Do not assume your subscription is active until the dashboard shows **Active** status.
+</Warning>
+
+---
+
+## Receipts
+
+Once the owner confirms a payment, a receipt appears in **Bills**. You can also retrieve all receipts from:
+
+```
+GET /payments/history
+```
+
+Each receipt record includes:
+
+- Receipt ID (formatted `SM-XXXXXX` on the downloadable HTML receipt)
+- Amount confirmed
+- Date and time of confirmation (IST)
+- The subscription or single-meal purchase it covers
+- Start and end dates of the covered plan
+
+<Info>
+  The downloadable receipt (`GET /payments/receipts/{receipt_id}`) is a self-contained HTML file you can print or save as a PDF from your browser. It includes the mess name, purchase type, payment date, and any à la carte line items from the corresponding bill snapshot. It is not a tax invoice.
+</Info>
+
+---
+
+## Bill History and Payment History
+
+<Tabs>
+  <Tab title="Bill history">
+    `GET /billing/history` returns all generated bill snapshots for your account, ordered newest-first. Each snapshot shows the amounts at the moment the bill was generated — useful for comparing figures over time.
+  </Tab>
+  <Tab title="Payment history">
+    `GET /payments/history` returns all owner-confirmed receipts against your subscriptions and single-meal purchases, also ordered newest-first. Cross-reference with bill snapshots to reconcile your balance.
+  </Tab>
+</Tabs>
+
+---
+
+## Credit and Refunds
+
+If skip deductions or confirmed payments result in a credit (paid more than owed), the `credit` field in the live bill shows the surplus.
+
+<Warning>
+  Smart Mess does not process automated refunds. If you have a credit balance — for example because skips were applied after a full payment — settle it directly with your mess owner. The app displays the credit amount on your dashboard and in the live bill response so both parties can see the figure clearly.
+</Warning>
+
+---
+
+## Cancelling a Pending Payment Submission
+
+If you submitted payment proof but the owner has not yet confirmed or rejected it, you can cancel the submission yourself:
+
+- The **Cancel submission** button appears in Bills while the submission status is `pending`.
+- Once the owner takes any action (confirm or reject), cancellation is no longer available through the app.
+- Fully paid checkouts and plans with confirmed receipts cannot be cancelled from the customer side — contact your owner.
+
+---
+
+## Frequently Asked Questions
+
+<Accordion title="My bill shows a higher amount than I expected. Where do I check the breakdown?">
+  Open **Bills → Current bill** to see the full itemised breakdown: base price, number of skips, deduction amount per skip, guest meal costs, and any à la carte order lines. If something looks wrong, take a screenshot and message your owner via Chat.
+</Accordion>
+
+<Accordion title="The owner confirmed my payment but my subscription still shows Pending. What happened?">
+  Subscriptions activate only on **full** payment. If you paid a partial amount, the balance due will be positive and the subscription stays in `pending_payment` until the remaining amount is confirmed. Check `balance_due` in your live bill.
+</Accordion>
+
+<Accordion title="Can I submit payment for a future subscription before it starts?">
+  Yes. The checkout flow creates a bill immediately, and you can submit payment proof straight away. The subscription activates the moment full payment is confirmed, regardless of whether the start date has arrived.
+</Accordion>

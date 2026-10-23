@@ -1,0 +1,160 @@
+---
+title: "English and Hindi: Multilingual UI and Dynamic Translation"
+sidebarTitle: "Multilingual"
+description: "Smart Mess supports English and Hindi across the full UI and dynamic saved content, with Google Cloud Translation for menus, offers, and mess descriptions."
+---
+
+Smart Mess supports English and Hindi for both static UI text and dynamic saved content. The language selector persists your choice across sessions, and the backend translates saved public descriptions — menus, offer descriptions, and mess profile text — on request using Google Cloud Translation. English source values, names, addresses, and amounts are never overwritten.
+
+## UI language
+
+Static interface text uses [i18next](https://www.i18next.com/) and [react-i18next](https://react.i18next.com/). Your language choice is saved in browser `localStorage` under the key `mess-language` and restored on every visit.
+
+<CardGroup cols={2}>
+  <Card title="English" icon="e">
+    Default language. All static UI strings, form labels, and error messages are available in English.
+  </Card>
+  <Card title="Hindi (हिन्दी)" icon="h">
+    Complete sentence-level translations for customer and owner screens. Reviewed Hindi resource files are shipped with the app.
+  </Card>
+</CardGroup>
+
+<Note>
+  New static UI strings added during development require a reviewed Hindi translation entry in the frontend resource files before they appear in Hindi. Runtime machine translation is reserved for saved descriptive content only — not for UI labels.
+</Note>
+
+## Dynamic content translation
+
+Saved public descriptions — meal menus, plan offer descriptions, and public mess profile fields — can be translated to Hindi on the fly using the backend `/translations` endpoint.
+
+The endpoint accepts **record identifiers and an allowlist of fields**, not arbitrary free-form text. This design ensures:
+
+- Only public, owner-written descriptions are ever translated.
+- Form inputs, names, addresses, amounts, IDs, and English source values are **never rewritten**.
+- Owner-provided Hindi descriptions take precedence over machine-translated text.
+
+### Translatable fields
+
+| Record type | Translatable fields |
+|---|---|
+| `meal` | `menu_description` |
+| `offer` | `description` |
+| `mess` | `about`, `preparation`, `tagline`, `business_type`, `food_type`, `service_type`, `operating_days` |
+
+### How translation works
+
+<Steps>
+  <Step title="Language switched to Hindi">
+    The frontend sends record identifiers to `POST /translations` with `"language": "hi"`.
+  </Step>
+  <Step title="Protected values are masked">
+    Owner name, mess name, URLs, email addresses, and numeric strings (prices, IDs, dates) are replaced with stable placeholders before the text leaves your server.
+  </Step>
+  <Step title="Cache is checked">
+    A SHA-256 content hash is checked in memory cache (and optional Redis cache) before calling Google. A cache hit returns instantly.
+  </Step>
+  <Step title="Google Cloud Translation is called">
+    If not cached, the masked text is sent to Google Cloud Translation Basic (v2). HTML entities in the response are unescaped automatically.
+  </Step>
+  <Step title="Placeholders are restored">
+    Protected values are substituted back into the translated text before it reaches the frontend.
+  </Step>
+  <Step title="Language switched back to English">
+    The frontend immediately restores original English values. Late-arriving Hindi responses do not overwrite English text or form inputs.
+  </Step>
+</Steps>
+
+## Configuration
+
+Add the following to `backend/.env`. **Never use a `VITE_`-prefixed variable** for the API key — it must stay on the backend only.
+
+```dotenv
+# Google Cloud Translation Basic (v2)
+GOOGLE_TRANSLATE_API_KEY=your_google_translate_api_key
+
+# Optional persistent Redis REST cache (e.g. Upstash)
+TRANSLATION_REDIS_REST_URL=
+TRANSLATION_REDIS_REST_TOKEN=
+
+# Character budget per worker per UTC day (default: 50,000)
+TRANSLATION_DAILY_CHARACTER_LIMIT=50000
+```
+
+Restart the backend after adding or changing these values. No database migration is needed.
+
+<Warning>
+  You must **enable the Cloud Translation API** and configure billing in Google Cloud Console before the key will work. Restrict the key to the Translation API only. Smart Mess will silently fall back to English if the key is missing, the provider is unavailable, or a protected value cannot be restored safely — it never exposes provider errors or credentials to the browser.
+</Warning>
+
+## Caching
+
+<CardGroup cols={2}>
+  <Card title="In-memory cache" icon="memory">
+    Entries are cached by content hash, target language, and protected names. Cache entries last **30 days** with a bounded size of 1,000 entries per worker. Resets on backend restart.
+  </Card>
+  <Card title="Redis REST cache (optional)" icon="server">
+    Configure `TRANSLATION_REDIS_REST_URL` and `TRANSLATION_REDIS_REST_TOKEN` (e.g. [Upstash](https://upstash.com/)) for a persistent cache shared across multiple workers and backend restarts. Cache storage never modifies the business database.
+  </Card>
+</CardGroup>
+
+## Character limits
+
+Smart Mess enforces an application-level daily character budget to help control costs:
+
+| Setting | Default | Description |
+|---|---|---|
+| `TRANSLATION_DAILY_CHARACTER_LIMIT` | `50,000` | Max source characters translated per worker per UTC day |
+| Provider-side quota | — | Configure separately in Google Cloud Console |
+| Per-request batch limit | `20,000` chars | Maximum characters per single `/translations` request |
+| Records per request | `20` max | Maximum records per `/translations` call |
+
+<Tip>
+  Configure both `TRANSLATION_DAILY_CHARACTER_LIMIT` in `backend/.env` **and** a project-level quota in Google Cloud Console. The application budget is per worker and resets at UTC midnight; multiple workers each have their own counter.
+</Tip>
+
+## API reference
+
+```http
+POST /translations
+Content-Type: application/json
+
+{
+  "records": [
+    { "kind": "meal", "id": 42, "field": "menu_description" },
+    { "kind": "offer", "id": 7, "field": "description" },
+    { "kind": "mess", "id": 1, "field": "about" }
+  ],
+  "language": "hi"
+}
+```
+
+The response contains a `translations` array. Each entry includes the original `source` text, the `text` field (translated or original English), and a `translated` boolean. When `translated` is `false`, the original English is returned — this happens when the provider is unavailable, credentials are missing, the source is already in Hindi, or a protected value cannot be restored.
+
+## Checking translation coverage
+
+Run the following from the `frontend/` directory to verify that all static UI strings and translation calls are accounted for:
+
+```bash
+npm run check:translations
+```
+
+<Accordion title="Additional language test scripts">
+  ```bash
+  # Test language switching behavior (unit)
+  npm run test:language
+
+  # Test language switching behavior (UI integration)
+  npm run test:language-ui
+  ```
+
+  These scripts verify that the language selector persists correctly, that late Hindi responses do not overwrite English inputs, and that the `mess-language` localStorage key is read on startup.
+</Accordion>
+
+## Fallback behavior
+
+Smart Mess is designed to degrade gracefully when translation is unavailable:
+
+- **Missing `GOOGLE_TRANSLATE_API_KEY`** → English is shown; no error is surfaced to users.
+- **Provider unavailable or quota exhausted** → English fallback; provider errors are never forwarded to the browser.
+- **Protected value cannot be restored** → The record is skipped; English source is returned instead.
+- **Language switched back to English** → Original English is restored immediately on the frontend, without waiting for any in-flight Hindi request to complete.

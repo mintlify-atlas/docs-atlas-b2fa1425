@@ -1,20 +1,73 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Smart Mess: Mess & Tiffin Management Platform"
+sidebarTitle: "Home"
+description: "Smart Mess is a full-stack platform for running a mess or tiffin service — manage meals, subscriptions, payments, delivery, and customer reviews from one place."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+Smart Mess is a complete management platform for mess and tiffin businesses. Owners publish daily menus, manage subscription plans and one-time orders, track deliveries, confirm payments, and analyze customer feedback — all from a single dashboard. Customers browse menus, order food, skip or pause meals, pay via QR or cash, and review their experience.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Run Smart Mess locally in minutes — start the backend, seed demo data, and open the frontend.
+  </Card>
+  <Card title="Deployment" icon="server" href="/deployment">
+    Deploy to Render (backend) and Vercel (frontend) with PostgreSQL via Supabase.
+  </Card>
+  <Card title="Owner Guide" icon="store" href="/owner/dashboard">
+    Set up your mess profile, publish meals, manage subscriptions, and record payments.
+  </Card>
+  <Card title="Customer Guide" icon="user" href="/customer/dashboard">
+    Order food, skip meals, pay your bill, and leave reviews for your mess.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What Smart Mess does
+
+Smart Mess handles the full lifecycle of a mess or tiffin service — from customer onboarding to daily meal management and payment reconciliation.
+
+<CardGroup cols={3}>
+  <Card title="Subscriptions" icon="calendar-check">
+    Weekly, monthly, trial, and custom-duration plans with owner approval and billing.
+  </Card>
+  <Card title="Single Meal Orders" icon="utensils">
+    Customers order one published meal without a subscription to try the food first.
+  </Card>
+  <Card title="Payment Workflow" icon="indian-rupee-sign">
+    Customers submit payment proofs; owners confirm receipts and update balances.
+  </Card>
+  <Card title="Delivery Tracking" icon="truck">
+    Owners mark meals as preparing, out for delivery, or delivered in real time.
+  </Card>
+  <Card title="AI Kitchen Advisor" icon="brain">
+    Gemini-powered review analysis surfaces what customers love and what to improve.
+  </Card>
+  <Card title="In-App Chat" icon="comments">
+    Floating chat widget lets owners and customers message each other directly.
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Clone and install">
+    Clone the repository and install backend and frontend dependencies. The backend uses Python 3.12 + FastAPI; the frontend uses React + Vite.
+  </Step>
+  <Step title="Configure environment">
+    Copy `backend/env.example` to `backend/.env` and set `DATABASE_URL` and `SECRET_KEY`. SQLite works out of the box for local development.
+  </Step>
+  <Step title="Run migrations and seed">
+    Run `python -m app.migrate upgrade` from the `backend` directory, then optionally seed demo data with `python backend/seed_preview.py`.
+  </Step>
+  <Step title="Start the app">
+    Start the backend with `uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8001` and the frontend with `npm run dev` inside `frontend/`. Open `http://127.0.0.1:5173`.
+  </Step>
+</Steps>
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore every REST endpoint — authentication, meals, subscriptions, billing, delivery, and reviews.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/environment">
+    All environment variables for the database, auth, AI integrations, SMTP, and translation.
+  </Card>
+</CardGroup>

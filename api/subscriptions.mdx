@@ -1,0 +1,371 @@
+---
+title: "Subscription Endpoints: Plans, Requests & Pauses API"
+sidebarTitle: "Subscriptions"
+description: "Full reference for plan offer management, subscription requests, owner approval workflow, pause previews, and customer roster in Smart Mess."
+---
+
+Subscriptions connect customers to a mess for a defined period and set of meal types. The lifecycle begins when an owner publishes a plan offer, a customer submits a request, and the owner approves it. From there, customers can pause their delivery on specific dates or let the owner assign a plan directly. This page documents every step of that lifecycle.
+
+<Info>
+  Subscriptions follow a multi-step state machine: **offer published → request submitted → request approved → pending payment → active**. A subscription only becomes active after the owner records full payment.
+</Info>
+
+---
+
+## Plan Offer Endpoints
+
+Owners publish plan offers that customers can browse and request. Offers define the duration, price, meal-price-per-skip, and which meal types are included.
+
+### `GET /owner/offers`
+
+Returns all active plan offers for the owner's mess, annotated with how many current subscriptions are assigned to each offer.
+
+**Auth:** Owner
+
+<CodeGroup>
+```bash Request
+GET /owner/offers
+Authorization: Bearer <token>
+```
+
+```json Response
+[
+  {
+    "id": 3,
+    "name": "Monthly Lunch",
+    "category": "regular",
+    "duration_days": 30,
+    "price": 2500.0,
+    "meal_types": ["lunch"],
+    "meal_price": 90.0,
+    "description": "Daily lunch from Monday to Saturday.",
+    "assigned_count": 12
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="id" type="integer">Unique offer ID.</ResponseField>
+<ResponseField name="name" type="string">Display name (3–80 chars).</ResponseField>
+<ResponseField name="category" type="string">Offer category: `regular`, `mini`, `protein`, or `special`.</ResponseField>
+<ResponseField name="duration_days" type="integer">Subscription length in calendar days (1–365).</ResponseField>
+<ResponseField name="price" type="number">Total subscription price.</ResponseField>
+<ResponseField name="meal_types" type="array">Ordered list of included types: `breakfast`, `lunch`, and/or `dinner`.</ResponseField>
+<ResponseField name="meal_price" type="number">Amount deducted from the bill when a customer skips one covered meal.</ResponseField>
+<ResponseField name="description" type="string">Free-text description (3–500 chars).</ResponseField>
+<ResponseField name="assigned_count" type="integer">Number of active or pending-payment subscriptions currently using this offer.</ResponseField>
+
+---
+
+### `POST /owner/offers`
+
+Publishes a new plan offer.
+
+**Auth:** Owner
+
+<ParamField body="name" type="string" required>Unique display name for the offer (3–80 chars).</ParamField>
+<ParamField body="category" type="string" required>One of `regular`, `mini`, `protein`, `special`.</ParamField>
+<ParamField body="duration_days" type="integer" required>Subscription duration in days (1–365).</ParamField>
+<ParamField body="price" type="number" required>Total subscription price (max 100,000).</ParamField>
+<ParamField body="meal_price" type="number" required>Per-meal deduction when the customer skips (max 10,000).</ParamField>
+<ParamField body="description" type="string" required>Plan description shown to customers (3–500 chars).</ParamField>
+<ParamField body="meal_types" type="array" required>At least one of `breakfast`, `lunch`, `dinner`. Each type may appear only once.</ParamField>
+
+Returns the created offer with HTTP **201**.
+
+---
+
+### `DELETE /owner/offers/{offer_id}`
+
+Unpublishes (soft-deletes) an offer so it no longer appears in the catalogue.
+
+**Auth:** Owner
+
+<ParamField path="offer_id" type="integer" required>ID of the offer to remove.</ParamField>
+
+```json Response
+{ "message": "Plan removed from the catalogue" }
+```
+
+<Warning>
+  Returns **HTTP 409** if any customer currently has an active or pending-payment subscription for this offer. Wait until all assigned subscriptions end or are cancelled before removing the offer.
+</Warning>
+
+---
+
+## Subscription Request Endpoints
+
+Customers browse available offers on the public plans page and submit requests. The owner then approves or rejects each request.
+
+### `POST /subscriptions/requests`
+
+Submits a subscription request. The customer picks an offer and a desired start date; the end date is calculated as `start_date + duration_days - 1`.
+
+**Auth:** Customer
+
+<ParamField body="offer_id" type="integer" required>ID of the plan offer to request.</ParamField>
+<ParamField body="start_date" type="string (date)" required>Desired start date (`YYYY-MM-DD`). Must be today or in the future.</ParamField>
+
+```json Response
+{
+  "message": "Plan requested. Your owner will confirm your subscription."
+}
+```
+
+<Warning>
+  Returns **HTTP 400** if the customer already has a pending request, or if an active/pending-payment subscription overlaps the requested date range.
+</Warning>
+
+---
+
+### `GET /subscriptions/requests`
+
+Returns all subscription requests submitted by the authenticated customer, most-recent first.
+
+**Auth:** Customer
+
+```json Response
+[
+  {
+    "id": 5,
+    "offer": { "id": 3, "name": "Monthly Lunch", ... },
+    "start_date": "2025-08-01",
+    "status": "pending"
+  }
+]
+```
+
+<ResponseField name="id" type="integer">Request ID.</ResponseField>
+<ResponseField name="offer" type="object">Full offer object (see `GET /owner/offers` fields).</ResponseField>
+<ResponseField name="start_date" type="string (date)">Requested start date.</ResponseField>
+<ResponseField name="status" type="string">One of `pending`, `approved`, `rejected`, or `cancelled`.</ResponseField>
+
+---
+
+### `GET /owner/requests`
+
+Returns all pending subscription requests across all customers of the owner's mess.
+
+**Auth:** Owner
+
+Response includes all fields from `GET /subscriptions/requests` plus:
+
+<ResponseField name="customer_name" type="string">Full name of the requesting customer.</ResponseField>
+<ResponseField name="customer_phone" type="string">Phone number of the requesting customer.</ResponseField>
+
+---
+
+### `PATCH /subscriptions/requests/{request_id}`
+
+Approves, rejects, or cancels a subscription request.
+
+- **Owner** can set `approved` or `rejected`.
+- **Customer** can only set `cancelled` on their own pending request.
+
+**Auth:** Owner or Customer (action-dependent)
+
+<ParamField path="request_id" type="integer" required>ID of the request to process.</ParamField>
+<ParamField body="status" type="string" required>One of `approved`, `rejected`, or `cancelled`.</ParamField>
+
+<CodeGroup>
+```json Request body
+{ "status": "approved" }
+```
+
+```json Response
+{ "message": "Request approved" }
+```
+</CodeGroup>
+
+<Note>
+  When approved, Smart Mess automatically creates a `MealPlan` record (status: `pending_payment`) and an `IssuedBill` snapshot for the full plan price. The subscription becomes **active** only after the owner records payment in full.
+</Note>
+
+<Warning>
+  Approving a request whose start date has already passed returns **HTTP 400**. Ask the customer to submit a new request with today or a future date.
+</Warning>
+
+---
+
+## Active Subscription Endpoints
+
+### `GET /subscriptions/current`
+
+Returns all active subscriptions for the authenticated customer that have not yet expired.
+
+**Auth:** Customer
+
+```json Response
+[
+  {
+    "id": 7,
+    "offer_id": 3,
+    "name": "Monthly Lunch",
+    "price": 2500.0,
+    "meal_price": 90.0,
+    "start_date": "2025-08-01",
+    "end_date": "2025-08-30",
+    "skip_count": 2,
+    "skipped_meals": 2,
+    "meal_types": ["lunch"]
+  }
+]
+```
+
+<ResponseField name="id" type="integer">Subscription (MealPlan) ID.</ResponseField>
+<ResponseField name="offer_id" type="integer | null">`null` for owner-assigned subscriptions not tied to a public offer.</ResponseField>
+<ResponseField name="name" type="string">Plan display name.</ResponseField>
+<ResponseField name="price" type="number">Total subscription price.</ResponseField>
+<ResponseField name="meal_price" type="number">Per-meal skip deduction amount.</ResponseField>
+<ResponseField name="start_date" type="string (date)">Subscription start date.</ResponseField>
+<ResponseField name="end_date" type="string (date)">Current end date (extended by skips).</ResponseField>
+<ResponseField name="skip_count" type="integer">Total extension days added so far.</ResponseField>
+<ResponseField name="skipped_meals" type="integer">Number of meals skipped under this plan.</ResponseField>
+<ResponseField name="meal_types" type="array">Meal types covered by this subscription.</ResponseField>
+
+---
+
+## Pause Endpoints
+
+Pausing lets customers skip all meals on a contiguous range of dates at once — useful for travel or holidays. Eligible meals are auto-skipped and the subscription end date is extended.
+
+### `GET /subscriptions/pause-preview`
+
+Returns a dry-run preview of what a pause would do, without making any changes.
+
+**Auth:** Customer
+
+<ParamField query="start_date" type="string (date)" required>First day of the pause range.</ParamField>
+<ParamField query="end_date" type="string (date)" required>Last day of the pause range.</ParamField>
+
+<CodeGroup>
+```bash Request
+GET /subscriptions/pause-preview?start_date=2025-08-10&end_date=2025-08-14
+Authorization: Bearer <token>
+```
+
+```json Response
+{
+  "message": "You can pause 5 dates, even before menus are published. Future meals on these dates will be skipped automatically.",
+  "pause_saved": false,
+  "can_pause": true,
+  "paused_dates": [],
+  "saved_dates": ["2025-08-05"],
+  "new_pause_dates": 5,
+  "covered_days": 5,
+  "skipped": 0,
+  "eligible_count": 4,
+  "meals": [
+    {
+      "meal_id": 44,
+      "date": "2025-08-10",
+      "meal_type": "lunch",
+      "menu_description": "Rajma Chawal",
+      "deduction": 0,
+      "extension_days": 1
+    }
+  ],
+  "unchanged": [
+    {
+      "meal_id": 45,
+      "date": "2025-08-11",
+      "meal_type": "lunch",
+      "menu_description": "Chole Bhature",
+      "reason": "Cutoff has passed"
+    }
+  ],
+  "published_count": 5,
+  "extension_days": 4,
+  "deductions": 0
+}
+```
+</CodeGroup>
+
+<ResponseField name="can_pause" type="boolean">`true` when at least one covered date exists in the range.</ResponseField>
+<ResponseField name="eligible_count" type="integer">Number of published meals that would be skipped.</ResponseField>
+<ResponseField name="meals" type="array">List of meals that would be skipped, each with `deduction` and `extension_days`.</ResponseField>
+<ResponseField name="unchanged" type="array">Meals that cannot be skipped and why (`reason` string).</ResponseField>
+<ResponseField name="extension_days" type="integer">Total days by which the subscription end date would be extended.</ResponseField>
+<ResponseField name="saved_dates" type="array">Dates that are already paused (active pause records).</ResponseField>
+
+---
+
+### `POST /subscriptions/pause`
+
+Applies the pause — skips all eligible meals in the date range and extends the subscription.
+
+**Auth:** Customer
+
+<ParamField body="start_date" type="string (date)" required>First day of the pause range.</ParamField>
+<ParamField body="end_date" type="string (date)" required>Last day of the pause range (max 91-day span).</ParamField>
+
+Response is the same shape as `GET /subscriptions/pause-preview` but with `pause_saved: true`, `paused_dates` populated, and `skipped` reflecting the actual skip count.
+
+<Warning>
+  Returns **HTTP 409** if the customer has confirmed à la carte orders on any date in the range. Cancel those extras first before pausing.
+</Warning>
+
+---
+
+## Owner Customer Management
+
+### `GET /owner/customers`
+
+Returns all customer accounts linked to the owner's mess, including their current subscription status and delivery address.
+
+**Auth:** Owner
+
+```json Response
+[
+  {
+    "id": 14,
+    "name": "Priya Sharma",
+    "phone": "9876543210",
+    "address": "Room 12, Sunrise Hostel, Pune",
+    "instructions": "Leave at the door",
+    "membership_status": "approved",
+    "subscriptions": [
+      {
+        "id": 7,
+        "name": "Monthly Lunch",
+        "status": "active",
+        "start_date": "2025-08-01",
+        "end_date": "2025-08-30",
+        "meal_types": ["lunch"],
+        "extension_days": 2
+      }
+    ]
+  }
+]
+```
+
+<ResponseField name="membership_status" type="string">Join-request status: `approved`, `pending`, or `rejected`.</ResponseField>
+<ResponseField name="subscriptions[].status" type="string">Derived status: `active`, `upcoming`, or `awaiting_payment`.</ResponseField>
+<ResponseField name="subscriptions[].extension_days" type="integer">Number of skip-credit days added to this subscription so far.</ResponseField>
+
+---
+
+### `POST /owner/plans`
+
+Directly assigns a subscription to a customer without going through the request flow. Creates a `pending_payment` subscription and an `IssuedBill` snapshot immediately.
+
+**Auth:** Owner
+
+<ParamField body="user_id" type="integer" required>Customer's user ID.</ParamField>
+<ParamField body="price" type="number" required>Total subscription price (must be > 0).</ParamField>
+<ParamField body="meal_price" type="number" required>Per-meal skip deduction amount (must be > 0).</ParamField>
+<ParamField body="start_date" type="string (date)" required>Subscription start date.</ParamField>
+<ParamField body="end_date" type="string (date)" required>Subscription end date (must be ≥ `start_date`).</ParamField>
+<ParamField body="meal_types" type="array" required>At least one of `breakfast`, `lunch`, `dinner`.</ParamField>
+
+```json Response
+{
+  "id": 9,
+  "status": "pending_payment",
+  "message": "Subscription assigned awaiting payment. It activates only after full payment is confirmed by the owner."
+}
+```
+
+<Warning>
+  Returns **HTTP 400** if the customer already has an active subscription or a payment in progress that overlaps the given date range.
+</Warning>

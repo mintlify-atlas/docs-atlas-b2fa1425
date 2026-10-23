@@ -1,0 +1,165 @@
+---
+title: "Pause and Skip Meals: Manage Your Subscription Dates"
+sidebarTitle: "Pause & Skip"
+description: "Skip Smart Mess meals before cutoff, pause a date range, preview eligible meals, and undo skips — with instant bill and subscription updates."
+---
+
+Life does not always follow a fixed meal schedule. Smart Mess lets you skip individual meals or pause an entire date range so you are not billed for food you will not eat. Every skip deducts the per-meal amount from your live bill in real time, and each unique day skipped extends your subscription end date by one day so you never lose coverage you paid for.
+
+<Note>
+  Skip and pause actions only work for meals covered by an **active** subscription. Single à la carte meal purchases cannot be paused.
+</Note>
+
+---
+
+## Skipping a Single Meal
+
+Use a single skip when you know in advance that you will miss one specific meal.
+
+```
+POST /meals/skip
+Body: { "meal_id": 42 }
+```
+
+<Steps>
+  <Step title="Find the meal on the dashboard or upcoming list">
+    Any meal showing **can\_manage: true** is still within the action window. Once the cutoff passes, this flag is removed.
+  </Step>
+  <Step title="Tap Skip">
+    The app calls `POST /meals/skip` with the meal's ID. The meal status updates to **Skipped**, the skip deduction (owner-set per-meal amount) is subtracted from your live bill, and your subscription end date extends by one day if this is the first skip for that calendar date.
+  </Step>
+  <Step title="Check your updated bill">
+    Your dashboard and bill refresh automatically after the skip. The `skipped_meals` count in your subscription panel increments, and `deductions` in the live bill increases by one `meal_price` amount.
+  </Step>
+</Steps>
+
+### Undoing a Skip
+
+Changed your mind? You can reverse a skip as long as the cutoff has not passed.
+
+```
+POST /meals/undo-skip
+Body: { "meal_id": 42 }
+```
+
+The meal status reverts to **Confirmed**, the deduction is restored to your bill, and the subscription extension day is removed (if it was the only skip for that date). The dashboard and bill refresh immediately.
+
+---
+
+## Pausing a Date Range
+
+When you are travelling or away for several days, pause a range instead of skipping meals one by one. A single pause request skips all eligible published meals across the entire range in one step.
+
+<Steps>
+  <Step title="Open Plans & pause">
+    Navigate to **Plans & pause → Pause dates**. Choose a start date and end date (both must be today or in the future; the range can span up to 91 days).
+  </Step>
+  <Step title="Preview the pause (recommended)">
+    Before confirming, call `GET /subscriptions/pause-preview?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` or tap **Preview**. The response lists:
+    - **Eligible meals** — published meals that will be skipped, with their date, meal type, and menu
+    - **Extension days** — how many subscription days will be added (one per unique date skipped for the first time)
+    - **Unchanged meals** — meals that cannot be skipped, each with a reason
+  </Step>
+  <Step title="Confirm the pause">
+    Tap **Pause these dates**. The app calls `POST /subscriptions/pause` with your chosen date range. All eligible meals are skipped atomically, the bill is updated, and the subscription end date is extended.
+  </Step>
+</Steps>
+
+<Info>
+  The pause also records the date range itself. **Future meals published after the pause on those dates are automatically skipped** — you do not need to revisit Plans & pause when the owner adds new meals to already-paused dates.
+</Info>
+
+---
+
+## Pause Preview Response
+
+The preview endpoint returns a clear summary before you commit:
+
+| Field | Description |
+|---|---|
+| `meals` | List of eligible meals that will be skipped, with `meal_id`, `date`, `meal_type`, and `menu_description` |
+| `unchanged` | Meals that will not be affected, each with a `reason` |
+| `eligible_count` | Number of published meals that can be skipped |
+| `extension_days` | Subscription days that will be added |
+| `covered_days` | Number of calendar days covered by an active subscription within the range |
+| `saved_dates` | All currently paused dates for your account (active and upcoming) |
+| `message` | Human-readable summary describing what the pause will do |
+
+---
+
+## Meals That Cannot Be Skipped
+
+The following meals are excluded from both individual skips and date-range pauses:
+
+<CardGroup cols={2}>
+  <Card title="Past the cutoff time" icon="clock">
+    The meal's cutoff time has passed. Skips are only accepted while the cutoff is in the future.
+  </Card>
+  <Card title="Already dispatched" icon="truck">
+    The owner has marked the meal as **Out for delivery** or **Delivered**. Dispatched meals are locked and cannot be changed.
+  </Card>
+  <Card title="Guest booking exists" icon="users">
+    You have already added a guest to this meal. Undo the guest addition before attempting a skip.
+  </Card>
+  <Card title="Already skipped" icon="ban">
+    The meal is already in **Skipped** status. Pausing over it again has no additional effect and is shown in the `unchanged` list.
+  </Card>
+  <Card title="Outside subscription dates" icon="calendar-xmark">
+    The meal falls on a date not covered by any of your active subscriptions.
+  </Card>
+  <Card title="À la carte extras ordered" icon="basket-shopping">
+    You have a confirmed extra order for a meal on a date being paused. Cancel the extras or contact your owner before pausing.
+  </Card>
+</CardGroup>
+
+---
+
+## How Subscription Extension Works
+
+Skipping a meal does not shorten your subscription — it adds days to the end:
+
+- The first skip on any given calendar date adds **one extension day** to the subscription end date.
+- If you skip multiple meals on the same day (e.g. both lunch and dinner), only one extension day is added for that date.
+- Undoing a skip removes the extension day (unless another skip for the same date still warrants it).
+- The subscription end date extension is visible in the **Current subscription** panel on your dashboard and in `GET /subscriptions/current` under `skip_count` and the updated `end_date`.
+
+<Warning>
+  The subscription end date is extended by skips, but future meals published **after** a skip (on non-paused dates) are **not** automatically included in your existing skips. The pause feature's automatic future-skip behaviour applies only to dates registered through `POST /subscriptions/pause`.
+</Warning>
+
+---
+
+## Undoing Individual Skips from a Pause
+
+Pauses create individual skip records for each affected meal. You can undo any of those individual skips before their respective cutoff times, exactly as you would undo a manually created skip:
+
+```
+POST /meals/undo-skip
+Body: { "meal_id": 55 }
+```
+
+Undoing one meal within a paused range does not remove the pause record for the date — other meals on that date remain skipped, and future meals published on that date will still be auto-skipped.
+
+---
+
+## Frequently Asked Questions
+
+<Accordion title="I paused a date range but the owner published a new meal on one of those dates. Will it be skipped?">
+  Yes. When a new meal is published on a date that is already in your paused record, it is automatically skipped without any action on your part. This is one of the key advantages of using pause instead of individual skips.
+</Accordion>
+
+<Accordion title="Does pausing change my subscription end date?">
+  No. Pausing itself does not change the end date. Only the individual skip records created by the pause extend the end date (one day per unique date skipped for the first time). Your original start and end dates remain in `original_start_date` and `original_end_date` for reference.
+</Accordion>
+
+<Accordion title="Can I pause dates outside my subscription period?">
+  No. The pause endpoint checks that at least one active subscription covers dates in the requested range. If your subscription does not cover any of the requested dates you will receive a `400` error: _"No active subscription covers these dates."_
+</Accordion>
+
+<Accordion title="What happens to my bill after I pause?">
+  Your live bill recalculates immediately. Each skipped meal's `meal_price` deduction is subtracted from the running total. The dashboard and Bills screen refresh automatically after the pause is saved so you see the updated figure right away.
+</Accordion>
+
+<Accordion title="Can I undo an entire pause at once?">
+  No. There is no single undo-pause endpoint. You must undo each individual skip before its cutoff time using `POST /meals/undo-skip`. Once a cutoff passes, that skip is permanent.
+</Accordion>

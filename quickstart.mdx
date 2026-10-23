@@ -1,47 +1,230 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Quickstart: Smart Mess Local Dev Environment Setup"
+sidebarTitle: "Quickstart"
+description: "Clone Smart Mess, start the FastAPI backend on port 8001 and Vite frontend, seed preview data, and log in with demo owner and customer accounts."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+The fastest way to understand Smart Mess is to run it locally. You will start two processes — a FastAPI backend on port 8001 and a Vite dev server on port 5173 — pointed at an isolated SQLite preview database that is completely separate from any production data. The whole setup takes less than ten minutes assuming the prerequisites are already installed.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure the following tools are available on your machine:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Python 3.12** — the backend targets CPython 3.12 (Render uses 3.12.11)
+- **Node.js** (LTS) — required for the React/Vite frontend
+- **Git** — to clone the repository
 
-## Get started
+## Setup
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
-
-    ```bash
-    npm install your-package
-    ```
+  <Step title="Clone the repository">
+    <CodeGroup>
+      ```bash bash
+      git clone https://github.com/okruti-akushwah/smart-mess.git
+      cd smart-mess
+      ```
+      ```powershell PowerShell
+      git clone https://github.com/okruti-akushwah/smart-mess.git
+      cd smart-mess
+      ```
+    </CodeGroup>
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
-    ```
+  <Step title="Create and activate a Python virtual environment">
+    <CodeGroup>
+      ```bash bash
+      python3.12 -m venv backend/.runtime
+      source backend/.runtime/bin/activate
+      ```
+      ```powershell PowerShell
+      py -3.12 -m venv backend/.runtime
+      backend\.runtime\Scripts\Activate.ps1
+      ```
+    </CodeGroup>
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+  <Step title="Install backend dependencies">
+    `requirements.txt` is the authoritative, version-pinned lock for both deployment and tests.
+
+    <CodeGroup>
+      ```bash bash
+      pip install -r backend/requirements.txt
+      ```
+      ```powershell PowerShell
+      pip install -r backend/requirements.txt
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure the backend environment">
+    Copy the example env file and set the three required variables for local preview:
+
+    <CodeGroup>
+      ```bash bash
+      cp backend/env.example backend/.env
+      ```
+      ```powershell PowerShell
+      Copy-Item backend/env.example backend/.env
+      ```
+    </CodeGroup>
+
+    Open `backend/.env` and confirm (or set) these values for local development:
+
+    ```dotenv backend/.env
+    DATABASE_URL=sqlite:///./preview.db
+    SECRET_KEY=local-preview-session-secret
+    APP_ENV=development
     ```
+
+    <Note>
+      The `SECRET_KEY` only needs to be stable within a single local session. In production, it must never change between restarts — rotating it invalidates all outstanding login tokens.
+    </Note>
+  </Step>
+
+  <Step title="Run database migrations">
+    Run the migration command from the `backend/` directory. For a brand-new preview database, the plain `upgrade` is sufficient:
+
+    <CodeGroup>
+      ```bash bash
+      cd backend
+      python -m app.migrate upgrade
+      cd ..
+      ```
+      ```powershell PowerShell
+      cd backend
+      python -m app.migrate upgrade
+      cd ..
+      ```
+    </CodeGroup>
+
+    <Tip>
+      If you are adopting an existing database that was created before the migration system was introduced, run `python -m app.migrate status` first for a read-only inventory, then `python -m app.migrate upgrade --allow-legacy-upgrade` to adopt it safely.
+    </Tip>
+  </Step>
+
+  <Step title="(Optional) Seed preview demo data">
+    Populate the isolated `preview.db` with realistic menus, plans, subscriptions, and payment records while the backend is running:
+
+    <CodeGroup>
+      ```bash bash
+      python backend/seed_preview.py
+      ```
+      ```powershell PowerShell
+      backend/.runtime/Scripts/python.exe backend/seed_preview.py
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Start the backend">
+    <CodeGroup>
+      ```bash bash
+      DATABASE_URL=sqlite:///./preview.db \
+      SECRET_KEY=local-preview-session-secret \
+      APP_ENV=development \
+      uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8001
+      ```
+      ```powershell PowerShell
+      $env:DATABASE_URL = 'sqlite:///./preview.db'
+      $env:SECRET_KEY   = 'local-preview-session-secret'
+      $env:APP_ENV      = 'development'
+      backend/.runtime/Scripts/python.exe -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8001
+      ```
+    </CodeGroup>
+
+    The interactive API docs will be available at **http://127.0.0.1:8001/docs**.
+  </Step>
+
+  <Step title="Start the frontend">
+    Open a **second terminal**, then install dependencies and start Vite. Setting `API_PROXY_TARGET` tells Vite to proxy `/api` requests to the isolated preview backend on port 8001 instead of the default port 8000.
+
+    <CodeGroup>
+      ```bash bash
+      cd frontend
+      npm install
+      API_PROXY_TARGET=http://127.0.0.1:8001 npm run dev -- --host 127.0.0.1
+      ```
+      ```powershell PowerShell
+      cd frontend
+      npm install
+      $env:API_PROXY_TARGET = 'http://127.0.0.1:8001'
+      npm run dev -- --host 127.0.0.1
+      ```
+    </CodeGroup>
+
+    The app will be available at **http://127.0.0.1:5173**.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Demo accounts
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+All three accounts use the password **`Demo1234`**.
+
+| Account | Phone | What to explore |
+|---|---|---|
+| Owner | `9000000001` | Manage Meals, Plans & Subscriptions, headcounts, Delivery, Payments, reviews |
+| Active customer | `9000000002` | Today's menu, skip/undo skip, add a guest, Bills, receipts, Reviews |
+| New customer | `9000000003` | A pending weekly subscription request |
+
+<Tip>
+  Start with the active customer (9000000002) to see a live bill with skip deductions and guest charges, then switch to the owner to approve the new customer's pending plan.
 </Tip>
+
+Owner login page: `http://127.0.0.1:5173/owner/login`  
+Customer login page: `http://127.0.0.1:5173/login`
+
+## Quick verification checklist
+
+Work through these checks after seeding to confirm the core flows are working:
+
+1. **Meal editing** — Log in as owner → Manage Meals → Edit → change the menu → Update Meal. Refresh and confirm the new menu persists.
+2. **Skip & bill** — Log in as active customer → skip a meal; verify the live bill drops by the skip deduction. Undo the skip and confirm the amount is restored.
+3. **Guest headcount** — Add a guest for tomorrow; log in as owner and confirm tomorrow's headcount has increased by one.
+4. **Subscription approval** — Log in as owner → approve the new customer's (9000000003) pending weekly plan.
+5. **Cut-off enforcement** — Verify that past-cutoff actions are blocked and that duplicate meal creation is rejected.
+6. **Role isolation** — Confirm that a customer account cannot access owner pages.
+7. **Mobile layout** — Check navigation and forms at a narrow viewport width.
+
+## Running automated tests
+
+<Tabs>
+  <Tab title="Backend">
+    ```bash
+    # Run the full isolated test suite from the repository root
+    python backend/run_tests.py
+
+    # Or use unittest discover directly
+    python -m unittest discover -s backend -p test_app.py
+    ```
+
+    Backend tests use in-memory SQLite by default and never touch the preview or production database.
+  </Tab>
+  <Tab title="Frontend">
+    ```bash
+    cd frontend
+    npm run lint
+    npm run build
+    ```
+  </Tab>
+  <Tab title="Workflow integration">
+    ```powershell
+    $env:PYTHONPATH = 'backend'
+    backend/.runtime/Scripts/python.exe -m unittest test_workflow.WorkflowTests.test_complete_owner_customer_payment_workflow
+    ```
+
+    This test exercises the complete owner → customer → payment confirmation cycle against an isolated SQLite database.
+  </Tab>
+</Tabs>
+
+<Warning>
+  Never run tests against your production or live staging database. The test runner forces in-memory SQLite and temporary upload storage before importing application code. PostgreSQL integration tests require an explicit opt-in — see `LIVE_DEPLOYMENT.md` for details.
+</Warning>
+
+## One-command demo (PowerShell)
+
+If you just want to explore without manually managing two terminals, use the bundled demo script. It seeds `backend/demo.db`, runs migrations, and starts the backend on port 8002 — then prints the frontend command to run in a second terminal.
+
+```powershell
+./start-demo.ps1
+```
+
+The demo runs at **http://127.0.0.1:5174** and uses the same three demo accounts above. The demo database is completely separate from `preview.db` and from your configured production database.

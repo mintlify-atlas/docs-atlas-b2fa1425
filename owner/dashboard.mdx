@@ -1,0 +1,160 @@
+---
+title: "Smart Mess Owner Dashboard: Full Walkthrough Guide"
+sidebarTitle: "Dashboard"
+description: "A complete walkthrough of the Smart Mess owner dashboard — headcounts, pending requests, join QR, and navigation to every management panel."
+---
+
+The owner dashboard is your command centre for running a Smart Mess. From a single screen you can see exactly how many meals to prepare today and tomorrow, act on membership and subscription requests before customers are kept waiting, and navigate to every tool the platform offers — all without leaving the browser.
+
+## Dashboard overview
+
+When you sign in as an owner, the dashboard loads four live counters near the top of the page. These counts poll the backend every five seconds and also refresh whenever the browser window regains focus, so the numbers stay accurate even if you leave the tab open.
+
+<CardGroup cols={2}>
+  <Card title="Today's headcount" icon="utensils">
+    Subscribers with a non-skipped meal scheduled for today, per meal type (breakfast, lunch, dinner).
+  </Card>
+  <Card title="Tomorrow's headcount" icon="calendar-day">
+    Expected diners for tomorrow after applying skips and guest additions already recorded.
+  </Card>
+  <Card title="Pending join requests" icon="user-plus">
+    Customers who submitted a join request through your link and are waiting for approval.
+  </Card>
+  <Card title="Pending subscription requests" icon="clipboard-list">
+    Customers who chose a published plan and are waiting for you to confirm their subscription.
+  </Card>
+</CardGroup>
+
+<Note>
+Headcounts include guest additions. A subscriber who added a guest for tomorrow shows as **2** expected diners for that meal, not 1.
+</Note>
+
+## Registering as an owner
+
+Every Smart Mess instance starts with owner registration. Send a `POST` request to `/auth/signup` with `role` set to `"owner"` and a `mess_name` that will appear on your public page.
+
+<CodeGroup>
+```json Request body
+{
+  "name": "Priya Sharma",
+  "phone": "9876543210",
+  "password": "SecurePass1",
+  "role": "owner",
+  "mess_name": "Priya's Home Kitchen"
+}
+```
+
+```json Response (201)
+{
+  "id": 1,
+  "name": "Priya Sharma",
+  "role": "owner"
+}
+```
+</CodeGroup>
+
+<Tip>
+Each phone number maps to exactly one account. Use a number you can receive messages on in case customers need to contact you directly.
+</Tip>
+
+## Dashboard navigation
+
+The dashboard links directly to every management section. Use the sidebar or the quick-access cards to jump between panels.
+
+<CardGroup cols={3}>
+  <Card title="Manage Meals" icon="bowl-food" href="/owner/manage-meals">
+    Publish, edit, and delete breakfast, lunch, and dinner menus.
+  </Card>
+  <Card title="Plans & Subscriptions" icon="receipt" href="/owner/subscriptions-plans">
+    Create plan offers and approve subscription requests.
+  </Card>
+  <Card title="Payments" icon="indian-rupee-sign" href="/owner/payments">
+    Upload your payment QR and record received money.
+  </Card>
+  <Card title="Delivery" icon="truck" href="/owner/delivery">
+    Mark meals as preparing, out for delivery, or delivered.
+  </Card>
+  <Card title="Reviews" icon="star">
+    Read meal ratings and customer suggestions.
+  </Card>
+  <Card title="AI Kitchen Advisor" icon="robot">
+    Get AI-powered suggestions for tomorrow's menu based on your history.
+  </Card>
+  <Card title="Public Profile" icon="globe" href="/owner/public-profile">
+    Edit your mess page and meal timings visible to everyone.
+  </Card>
+</CardGroup>
+
+## Getting your join link and QR code
+
+Customers no longer register through the owner dashboard directly — they self-register through a unique join link you share with them. Call `GET /owner/join-link` to retrieve your token at any time.
+
+<CodeGroup>
+```http Request
+GET /owner/join-link
+Authorization: Bearer <owner_token>
+```
+
+```json Response (200)
+{
+  "token": "pQ7rT2xLmNvKwYjAcBdEfG",
+  "owner_name": "Priya Sharma"
+}
+```
+</CodeGroup>
+
+Your public mess page lives at `/mess/{token}` and the registration form at `/join/{token}`. Customers who tap **Join this mess** on your public page are taken straight to the registration form.
+
+<Steps>
+  <Step title="Open your dashboard">
+    Navigate to **Join my mess** in the owner dashboard sidebar.
+  </Step>
+  <Step title="Copy or download">
+    Copy the join link to share via WhatsApp, or click **Download QR** to save a PNG image of the QR code.
+  </Step>
+  <Step title="Set your website address">
+    Before downloading the QR, enter your mess website address (e.g., your server IP on the local Wi-Fi) so the QR encodes the correct URL that customers' phones can reach.
+  </Step>
+  <Step title="Share">
+    Print the QR, post it on WhatsApp, or display it at your counter. The same token is reused for every customer — you never need to regenerate it.
+  </Step>
+</Steps>
+
+<Warning>
+If you previously distributed a QR that pointed to `/join/{token}` it will still open the registration form directly. New QR downloads point to `/mess/{token}` — the public mess page — from which customers tap **Join this mess**. Download a fresh QR to use the updated flow.
+</Warning>
+
+## Reviewing pending join requests
+
+When a customer submits a join request, it appears in the **Customer join requests** panel and the pending-requests counter increments.
+
+**List pending requests**
+
+```http
+GET /owner/join-requests
+Authorization: Bearer <owner_token>
+```
+
+Each item includes the customer's name, phone number, creation timestamp, and — if they pre-selected a plan — the offer name, price, and proposed start/end dates.
+
+**Approve or decline a request**
+
+```http
+PATCH /owner/join-requests/{request_id}
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+
+{
+  "status": "approved"
+}
+```
+
+Pass `"rejected"` to decline. A declined customer can resubmit through the same join link using their existing phone and password.
+
+<Info>
+Approval and subscription creation happen together when the customer pre-selected a plan. The new subscription enters `pending_payment` status immediately and a bill is generated. The subscription activates only after you confirm full payment in the Payments panel.
+</Info>
+
+<Note>
+Manual customer registration has been removed from the dashboard. All new customers must join through your link. You can still assign subscriptions directly from the **Plans & Subscriptions** panel after approving membership.
+</Note>

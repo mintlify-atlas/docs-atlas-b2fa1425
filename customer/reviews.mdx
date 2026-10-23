@@ -1,0 +1,151 @@
+---
+title: "Rating Meals: Submit and Update Reviews on Smart Mess"
+sidebarTitle: "Reviews"
+description: "Rate past meals on Smart Mess, check review eligibility, update existing reviews, and see how feedback reaches the public page and owner dashboard."
+---
+
+Your feedback helps your mess owner improve the menu and gives future members an honest view of the food. Smart Mess invites you to rate each past meal on a five-star scale and leave an optional written suggestion — all from inside the app, with no external accounts needed.
+
+---
+
+## Review Eligibility
+
+Not every past meal is reviewable. Before you can leave a rating, a meal must meet all of the following conditions:
+
+<CardGroup cols={2}>
+  <Card title="Covered by a subscription" icon="id-card">
+    The meal must fall within the dates of at least one of your active subscriptions. Individual à la carte purchases that have not been delivered are excluded.
+  </Card>
+  <Card title="Not skipped" icon="circle-check">
+    You must have eaten the meal — skipped meals are excluded from the eligible list.
+  </Card>
+  <Card title="Within 60 days" icon="calendar">
+    Reviews are accepted for meals up to 60 days in the past. Older meals no longer appear in the eligible list.
+  </Card>
+  <Card title="Delivered (for new checkout meals)" icon="truck">
+    For subscription meals with delivery tracking, the owner must have marked the meal as **Delivered** and the delivery confirmation must be from a previous calendar day (IST). Meals marked delivered the same day are reviewable from the next day onward.
+  </Card>
+</CardGroup>
+
+<Info>
+  Legacy subscriptions assigned directly by the owner (without delivery tracking) use past-date eligibility only. If your subscription pre-dates the delivery tracking feature, any past non-skipped meal within 60 days is reviewable immediately.
+</Info>
+
+---
+
+## The Review Prompt
+
+You do not need to hunt for the Reviews section manually. The day after a meal is marked **Delivered**, the dashboard displays a review card directly in your meal feed showing:
+
+- The AI-generated or illustrative meal photo
+- The menu description for that meal
+- A five-star picker
+- An optional text field for suggestions
+
+Submitting from this prompt calls the same review endpoint — it is a convenience shortcut, not a separate workflow.
+
+---
+
+## Submitting a Review
+
+<Steps>
+  <Step title="Open the Reviews section or use the dashboard prompt">
+    Navigate to **Reviews** in the sidebar, or tap the review card that appears on your dashboard the day after delivery. Both surfaces show the same list of eligible meals from `GET /reviews/eligible`.
+  </Step>
+  <Step title="Choose a rating">
+    Tap 1–5 stars. A rating is required; the comment is optional but encouraged — it goes directly to the owner's Meal Ratings & Suggestions panel.
+  </Step>
+  <Step title="Add an optional comment">
+    Write up to 500 characters of feedback. Describe what you enjoyed, what could be improved, or any specific requests. The comment is visible to the owner and (without personal detail) on the public mess page.
+  </Step>
+  <Step title="Submit">
+    Tap **Submit review**. The app calls:
+
+    ```
+    POST /reviews
+    Body: {
+      "meal_id": 42,
+      "rating": 4,
+      "comment": "Dal was great, a bit less salt next time please."
+    }
+    ```
+
+    A success message confirms: _"Thank you! Your rating and suggestions have been sent to your mess owner."_
+  </Step>
+</Steps>
+
+---
+
+## Updating a Review
+
+You can update a review at any time while the meal remains eligible (within 60 days, not skipped). Simply submit the review endpoint again for the same `meal_id` with your new rating and comment — the system overwrites the previous entry rather than creating a duplicate.
+
+```
+POST /reviews
+Body: {
+  "meal_id": 42,
+  "rating": 5,
+  "comment": "Revisiting — today's portion size was perfect!"
+}
+```
+
+<Note>
+  There is no separate `PUT /reviews/{id}` endpoint. Resubmitting with `POST /reviews` for the same meal automatically updates the existing review.
+</Note>
+
+---
+
+## Where Your Reviews Appear
+
+<Tabs>
+  <Tab title="Public mess page">
+    Approved reviews appear on your mess's public page (`GET /public/reviews`). The public view shows:
+    - Your **first name** only (full name is never shown publicly)
+    - Your star rating (1–5)
+    - Your comment
+    - The menu description of the rated meal
+
+    The most recent 30 reviews are shown, ordered newest-first. No login is required to read the public page.
+  </Tab>
+  <Tab title="Owner's dashboard">
+    The owner sees all reviews — up to the last 100 — in their **Meal Ratings & Suggestions** panel via `GET /owner/reviews`. The owner view includes your full name, phone number (for internal reference), the meal photo, meal type, date, and the timestamp of the review. This helps the owner connect feedback to specific menu decisions.
+  </Tab>
+</Tabs>
+
+---
+
+## Meals Excluded from Reviews
+
+The following meal types are never eligible for reviews, even within 60 days:
+
+| Excluded meal type | Reason |
+|---|---|
+| Skipped meals | You did not receive the food |
+| À la carte orders not yet delivered | Delivery must be confirmed before review eligibility |
+| À la carte orders not fully paid | Unpaid single-meal purchases cannot be reviewed |
+| Meals outside your subscription dates | No coverage by an active subscription |
+| Meals older than 60 days | Review window has expired |
+
+---
+
+## Frequently Asked Questions
+
+<Accordion title="I ate the meal yesterday but it doesn't appear in my Reviews list. Why?">
+  For subscriptions with delivery tracking, eligibility requires the owner to mark the meal as **Delivered** and for that confirmation to be recorded on a previous calendar day (IST). If the owner has not yet updated the delivery status, the meal will not appear in the eligible list. Check back after the owner marks it delivered.
+</Accordion>
+
+<Accordion title="Can I delete a review I submitted by mistake?">
+  There is no delete option. You can overwrite a review by resubmitting with a new rating and blank comment, but the review record itself remains in the system. If you have a specific concern, message your owner via Chat.
+</Accordion>
+
+<Accordion title="Does my review affect my subscription or billing?">
+  No. Reviews are purely informational. They do not affect your subscription status, bill amounts, or any other account feature.
+</Accordion>
+
+<Accordion title="My subscription is 'active' but I see no eligible meals. What should I do?">
+  Check that your meals have been published by the owner (meals need to be individually created or auto-published from the weekly menu), that none of them are marked as skipped, and that the delivery status has been updated if your subscription uses delivery tracking. If you recently had your subscription assigned as a legacy plan (no delivery tracking), past meals within 60 days should appear immediately.
+</Accordion>
+
+<Accordion title="Is my full name shown publicly with my review?">
+  No. The public reviews page (`GET /public/reviews`) displays only your first name. Your phone number and full name are visible only to the mess owner through their private dashboard.
+</Accordion>

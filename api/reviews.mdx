@@ -1,0 +1,316 @@
+---
+title: "Review Endpoints: Ratings, Feedback & AI Advisor API"
+sidebarTitle: "Reviews"
+description: "Reference for customer meal reviews, public review display, owner review management, and the AI-powered Kitchen Advisor analysis feature in Smart Mess."
+---
+
+Smart Mess includes a structured feedback loop: customers rate past meals, owners see aggregated feedback on their dashboard, and the AI-powered Kitchen Advisor uses recent reviews to surface actionable insights. All review data is scoped to the mess the customer belongs to, and personal identifiers are redacted before being passed to the AI model.
+
+<Info>
+  Reviews can be submitted or updated at any time within 60 days of the meal date. Customers can update a previously submitted review by calling `POST /reviews` again for the same `meal_id`.
+</Info>
+
+---
+
+## Customer Review Endpoints
+
+### `GET /reviews/eligible`
+
+Returns a list of past meals the authenticated customer is eligible to review. A meal is eligible when all of the following are true:
+
+- It was **not skipped**
+- It falls **within the last 60 days** (exclusive of today)
+- It is **covered by an active subscription**, or it was a delivered à la carte single-meal booking
+
+Meals are returned most-recent first, grouped by date and meal type (`breakfast` → `lunch` → `dinner`).
+
+**Auth:** Customer
+
+<CodeGroup>
+```bash Request
+GET /reviews/eligible
+Authorization: Bearer <token>
+```
+
+```json Response
+[
+  {
+    "id": 42,
+    "date": "2025-07-17",
+    "meal_type": "lunch",
+    "menu": "Dal Makhani, Jeera Rice, Roti",
+    "rating": 4,
+    "comment": "Dal was very tasty today.",
+    "image_url": "/images/lunch-42.jpg"
+  },
+  {
+    "id": 38,
+    "date": "2025-07-16",
+    "meal_type": "dinner",
+    "menu": "Palak Paneer, Roti, Rice",
+    "rating": null,
+    "comment": "",
+    "image_url": null
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="id" type="integer">Meal ID (used when submitting a review).</ResponseField>
+<ResponseField name="date" type="string (date)">Date the meal was served.</ResponseField>
+<ResponseField name="meal_type" type="string">`breakfast`, `lunch`, or `dinner`.</ResponseField>
+<ResponseField name="menu" type="string">Meal menu description.</ResponseField>
+<ResponseField name="rating" type="integer | null">Customer's existing rating (1–5), or `null` if not yet reviewed.</ResponseField>
+<ResponseField name="comment" type="string">Customer's existing comment, or an empty string if not yet reviewed.</ResponseField>
+<ResponseField name="image_url" type="string | null">URL of the meal image uploaded by the owner.</ResponseField>
+
+---
+
+### `POST /reviews`
+
+Submits a new review or updates an existing one. Only meals returned by `GET /reviews/eligible` are accepted. Submitting the same `meal_id` a second time silently replaces the earlier rating and comment.
+
+**Auth:** Customer
+
+<ParamField body="meal_id" type="integer" required>ID of the meal to review (must appear in `GET /reviews/eligible`).</ParamField>
+<ParamField body="rating" type="integer" required>Star rating from **1** (worst) to **5** (best).</ParamField>
+<ParamField body="comment" type="string">Optional written feedback (max 500 chars). Leading and trailing whitespace is trimmed automatically.</ParamField>
+
+<CodeGroup>
+```json Request body
+{
+  "meal_id": 42,
+  "rating": 4,
+  "comment": "Dal was very tasty today. A little less oil in the sabzi would be nice."
+}
+```
+
+```json Response
+{
+  "message": "Thank you! Your rating and suggestions have been sent to your mess owner."
+}
+```
+</CodeGroup>
+
+<Warning>
+  Returns **HTTP 400** if `meal_id` is not in the customer's eligible list. Common reasons: meal was skipped, outside the 60-day window, or not covered by any subscription.
+</Warning>
+
+---
+
+## Public Review Endpoint
+
+### `GET /public/reviews`
+
+Returns the most recent 30 published reviews for a mess, anonymised to first name only. Intended for the mess's public landing page.
+
+**Auth:** None — requires `mess_token` query parameter
+
+<ParamField query="mess_token" type="string" required>The public token identifying the mess (found in the mess's share link).</ParamField>
+
+<CodeGroup>
+```bash Request
+GET /public/reviews?mess_token=abc123xyz
+```
+
+```json Response
+[
+  {
+    "id": 77,
+    "meal_id": 42,
+    "name": "Priya",
+    "rating": 4,
+    "comment": "Dal was very tasty today.",
+    "menu": "Dal Makhani, Jeera Rice, Roti"
+  },
+  {
+    "id": 74,
+    "meal_id": 38,
+    "name": "Rahul",
+    "rating": 5,
+    "comment": "Best dinner this week!",
+    "menu": "Palak Paneer, Roti, Rice"
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="id" type="integer">Review record ID.</ResponseField>
+<ResponseField name="meal_id" type="integer">ID of the reviewed meal.</ResponseField>
+<ResponseField name="name" type="string">Customer's first name only (full name is never exposed publicly).</ResponseField>
+<ResponseField name="rating" type="integer">Star rating (1–5).</ResponseField>
+<ResponseField name="comment" type="string">Written comment.</ResponseField>
+<ResponseField name="menu" type="string">Meal menu description of the reviewed meal.</ResponseField>
+
+---
+
+## Owner Review Endpoints
+
+### `GET /owner/reviews`
+
+Returns the full review list for the owner's mess — up to 100 reviews, most recent first — including customer details and meal metadata.
+
+**Auth:** Owner
+
+<CodeGroup>
+```bash Request
+GET /owner/reviews
+Authorization: Bearer <token>
+```
+
+```json Response
+[
+  {
+    "id": 77,
+    "meal_id": 42,
+    "name": "Priya Sharma",
+    "rating": 4,
+    "comment": "Dal was very tasty today. A little less oil would be nice.",
+    "menu": "Dal Makhani, Jeera Rice, Roti",
+    "image_url": "/images/lunch-42.jpg",
+    "date": "2025-07-17",
+    "meal_type": "lunch",
+    "created_at": "2025-07-17T19:32:00"
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="id" type="integer">Review record ID.</ResponseField>
+<ResponseField name="meal_id" type="integer">ID of the reviewed meal.</ResponseField>
+<ResponseField name="name" type="string">Customer's full name.</ResponseField>
+<ResponseField name="rating" type="integer">Star rating (1–5).</ResponseField>
+<ResponseField name="comment" type="string">Written comment (empty string if none).</ResponseField>
+<ResponseField name="menu" type="string">Meal menu description.</ResponseField>
+<ResponseField name="image_url" type="string | null">Meal image URL.</ResponseField>
+<ResponseField name="date" type="string (date)">Date the meal was served.</ResponseField>
+<ResponseField name="meal_type" type="string">`breakfast`, `lunch`, or `dinner`.</ResponseField>
+<ResponseField name="created_at" type="string (datetime)">UTC timestamp when the review was first submitted.</ResponseField>
+
+---
+
+## Kitchen Advisor Endpoints
+
+The Kitchen Advisor uses the Gemini AI model to analyse recent reviews and surface structured findings — positives to continue, issues to investigate, and suggested actions. All review data is redacted of phone numbers and email addresses before being sent to the AI.
+
+<Warning>
+  The Kitchen Advisor requires a valid `GEMINI_API_KEY` environment variable on the backend. If not configured, `POST /owner/kitchen-advisor/analyze` returns **HTTP 503**.
+</Warning>
+
+### `GET /owner/kitchen-advisor/reviews`
+
+Fetches the raw review data that would be passed to the AI for a given period, without calling the AI model. Use this to verify review coverage before triggering a (potentially slow) analysis.
+
+**Auth:** Owner
+
+<ParamField query="days" type="integer">Review window in days. Must be **7** or **30** (default: `7`).</ParamField>
+<ParamField query="demo" type="boolean">If `true`, uses built-in sample reviews instead of real data. Useful for testing the advisor without needing real feedback.</ParamField>
+
+<CodeGroup>
+```bash Request
+GET /owner/kitchen-advisor/reviews?days=7
+Authorization: Bearer <token>
+```
+
+```json Response
+{
+  "reviews": [
+    { "id": "r1", "rating": 4, "comment": "Dal was very tasty today." },
+    { "id": "r2", "rating": 2, "comment": "Rice was undercooked at lunch." }
+  ],
+  "review_count": 2,
+  "comment_count": 2,
+  "average_rating": 3.0,
+  "demo": false,
+  "days": 7
+}
+```
+</CodeGroup>
+
+<ResponseField name="reviews" type="array">Redacted review objects, each with a synthetic `id` (e.g. `r1`), `rating`, and `comment`.</ResponseField>
+<ResponseField name="review_count" type="integer">Total number of reviews in the period.</ResponseField>
+<ResponseField name="comment_count" type="integer">Number of reviews that include a written comment (only these are analysed by the AI).</ResponseField>
+<ResponseField name="average_rating" type="number | null">Mean star rating across all reviews in the period, or `null` if there are no reviews.</ResponseField>
+<ResponseField name="demo" type="boolean">Whether built-in sample data was used.</ResponseField>
+<ResponseField name="days" type="integer">Review period used (7 or 30).</ResponseField>
+
+---
+
+### `POST /owner/kitchen-advisor/analyze`
+
+Calls the Gemini AI model to analyse reviews from the specified period and return a structured report with positives, issues, and suggested actions. Results are cached for 15 minutes per owner per unique review fingerprint.
+
+**Auth:** Owner
+
+<ParamField body="days" type="integer" required>Review window: **7** or **30** days.</ParamField>
+<ParamField body="language" type="string">Response language: `en` (English, default) or `hi` (Hindi).</ParamField>
+<ParamField body="demo" type="boolean">If `true`, analyses the built-in sample reviews instead of real data.</ParamField>
+
+<CodeGroup>
+```json Request body
+{ "days": 7, "language": "en", "demo": false }
+```
+
+```json Response
+{
+  "reviews": [...],
+  "review_count": 8,
+  "comment_count": 8,
+  "average_rating": 3.4,
+  "demo": false,
+  "days": 7,
+  "advice": {
+    "summary": "Customers appreciate the taste of dal and rotis but repeatedly flag undercooked rice at lunch and late dinner deliveries.",
+    "positives": [
+      {
+        "title": "Dal and Roti Quality",
+        "detail": "Multiple reviewers praised the dal flavour and softness of rotis, describing them as home-cooked quality.",
+        "review_ids": ["r1", "r5", "r8"]
+      }
+    ],
+    "issues": [
+      {
+        "title": "Undercooked Rice at Lunch",
+        "detail": "Two reviewers specifically mentioned hard or undercooked rice at the lunch service.",
+        "review_ids": ["r2", "r4"]
+      }
+    ],
+    "actions": [
+      {
+        "title": "Check Rice Cooking Before Packing",
+        "detail": "Consider testing rice texture before packing lunch to address the texture concerns raised.",
+        "review_ids": ["r2", "r4"]
+      }
+    ]
+  },
+  "model": "gemini-3.1-flash-lite",
+  "cached": false,
+  "generated_at": "2025-07-18T13:45:00+00:00"
+}
+```
+</CodeGroup>
+
+<ResponseField name="advice.summary" type="string">One-paragraph narrative summarising the overall review themes (max 700 chars).</ResponseField>
+<ResponseField name="advice.positives" type="array">Up to 3 positive findings. Each has `title`, `detail`, and `review_ids` (citing which review IDs support the finding).</ResponseField>
+<ResponseField name="advice.issues" type="array">Up to 3 issues found in the reviews, each with `title`, `detail`, and `review_ids`.</ResponseField>
+<ResponseField name="advice.actions" type="array">Up to 3 suggested actions for the owner, each with `title`, `detail`, and `review_ids` as evidence.</ResponseField>
+<ResponseField name="model" type="string">The Gemini model name used to generate the analysis.</ResponseField>
+<ResponseField name="cached" type="boolean">`true` if this response was served from the 15-minute in-memory cache.</ResponseField>
+<ResponseField name="generated_at" type="string (datetime)">ISO 8601 UTC timestamp of when the analysis was generated.</ResponseField>
+
+<Accordion title="Error codes for Kitchen Advisor">
+
+| HTTP Status | Cause |
+|---|---|
+| **400** | No written reviews in the selected period. Collect feedback or switch to `demo: true` to test. |
+| **422** | `days` is not `7` or `30`. |
+| **429** | A new analysis was requested within 15 seconds of the previous one. Wait and retry. |
+| **503** | `GEMINI_API_KEY` is missing or invalid, or the AI provider rejected the key or model. |
+| **504** | AI analysis timed out (45-second limit). Retry once. |
+| **502** | AI provider is unreachable or returned an unparseable response. |
+
+</Accordion>
+
+<Tip>
+  Each finding's `review_ids` array contains the synthetic IDs (`r1`, `r2`, …) from the `GET /owner/kitchen-advisor/reviews` response. Cross-reference them to show the owner the exact reviews supporting each finding.
+</Tip>

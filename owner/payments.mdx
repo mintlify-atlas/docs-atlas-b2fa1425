@@ -1,0 +1,168 @@
+---
+title: "Recording and Confirming Customer Payments in Smart Mess"
+sidebarTitle: "Payments"
+description: "Set up your payment QR, record money received from customers, confirm payment screenshots, and understand how receipts update customer balances."
+---
+
+Smart Mess does not collect money on your behalf — all payments flow directly between you and your customers. The **Payments** panel gives you the tools to display your UPI QR to customers, record money you actually receive, and confirm payment screenshots submitted by customers. Every confirmed payment creates a receipt that customers can view in their **Bills** section.
+
+<Note>
+There is no payment gateway, escrow, or automatic settlement. Recording a payment in this panel means you are marking money you have already received in cash or UPI.
+</Note>
+
+## Setting up your payment QR
+
+Upload a PNG or JPEG image of your UPI QR code (maximum 5 MB) so customers can find it under **Bills → Scan & pay**.
+
+```http
+POST /owner/payment-qr
+Authorization: Bearer <owner_token>
+Content-Type: multipart/form-data
+
+file=<your-qr-image.png>
+```
+
+A successful upload returns:
+
+```json
+{
+  "message": "Payment QR uploaded. Customers can now view it in Bills.",
+  "qr_url": "/payment-images/a1b2c3d4e5f6.png",
+  "payee_name": "",
+  "upi_id": ""
+}
+```
+
+<Tip>
+Uploading a new QR image automatically removes the old one. The URL changes each upload so browsers display the replacement immediately without caching the old image.
+</Tip>
+
+**Remove the QR**
+
+```http
+DELETE /owner/payment-qr
+Authorization: Bearer <owner_token>
+```
+
+Removing the QR hides the **Scan & pay** option for customers. Existing receipts are not affected.
+
+## Setting recipient name and UPI ID
+
+Add your name and UPI ID alongside the QR so customers can verify they are paying the right person.
+
+```http
+PUT /owner/payment-methods
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+
+{
+  "payee_name": "Priya Sharma",
+  "upi_id": "priya@upi",
+  "instructions": "Pay via UPI or hand cash to Priya at the counter by 12:00 noon."
+}
+```
+
+The `instructions` field (up to 500 characters) appears under the QR in the customer's Bills section. Use it for cash collection instructions, timing requirements, or any other guidance.
+
+## Recording received payments
+
+When a customer pays you — in person or via UPI — record it here. This creates a receipt and reduces their outstanding balance.
+
+<CodeGroup>
+```json Request body
+{
+  "plan_id": 7,
+  "amount": 3000.00,
+  "reference": "UPI ref 123456 received 14 Aug",
+  "receipt_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```json Response (201)
+{
+  "message": "Payment received from customer recorded",
+  "id": 38
+}
+```
+</CodeGroup>
+
+```http
+POST /owner/payments
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+```
+
+**Key rules:**
+
+- `receipt_key` must be a UUID v4. Use a fresh UUID for each new payment. Repeating the same key with identical amount and reference is idempotent — it returns the existing receipt without creating a duplicate. Using the same key with different values returns HTTP 409.
+- `amount` cannot exceed the customer's current balance due. The API checks the live bill before recording.
+- Confirming full payment activates a `pending_payment` subscription automatically.
+
+<Warning>
+Keep the `backend/payment_proofs/` and `backend/payment_images/` folders when moving the app or database to a new server. These folders contain customer-submitted payment screenshots and your uploaded QR images. Losing them breaks receipt links and removes proof of payment.
+</Warning>
+
+## Viewing payment history and summary
+
+**All customer balances**
+
+```http
+GET /owner/payments
+Authorization: Bearer <owner_token>
+```
+
+Returns every customer with their current bill, balance due, and whether a bill snapshot has been generated.
+
+**Monthly summary**
+
+```http
+GET /owner/payments/summary
+Authorization: Bearer <owner_token>
+```
+
+```json
+{
+  "total_received": 45000.00,
+  "payment_count": 18,
+  "month_received": 12500.00,
+  "month_payment_count": 5,
+  "month": "2025-08"
+}
+```
+
+Monthly figures use India Standard Time (IST) to define the calendar month, matching how you would naturally track your income.
+
+## Confirming payment submissions from customers
+
+Customers can submit a payment screenshot and amount to you through the **Bills** section. When a customer submits:
+
+1. The submission appears in your **Payments** panel as `pending`.
+2. You review the screenshot — click the image to open it at full size.
+3. Click **Confirm received** to approve or **Reject** to decline.
+
+Confirming a submission:
+
+- Creates one receipt (`PaymentRecord`) linked to the customer's plan.
+- Reduces their outstanding balance by the confirmed amount.
+- Sends an in-app notification to the customer.
+- Activates a `pending_payment` subscription if the full amount is now settled.
+
+A rejected submission can be resubmitted by the customer with a corrected screenshot or amount.
+
+<Accordion title="Receipt numbering">
+Receipts are numbered sequentially as `SM-000001`, `SM-000002`, and so on. Each receipt is available as a standalone HTML page that customers can print or save as PDF from their browser. The receipt page includes the mess name, customer name, purchase dates, confirmed amount, and any a la carte extra lines from the bill snapshot.
+</Accordion>
+
+## How receipts appear to customers
+
+Every confirmed `PaymentRecord` is visible in the customer's **Bills → Payment receipts** list. The customer sees:
+
+- Receipt number (e.g. `SM-000038`)
+- Date and time the payment was confirmed (IST)
+- Amount confirmed
+- Reference note you entered (e.g., the UPI transaction reference)
+- A link to download the HTML receipt
+
+<Info>
+The receipt page is served at `/payments/receipts/{receipt_id}`. It requires authentication — the customer must be logged in, or you must be logged in as the owner. The page is optimised for **Print → Save as PDF** from the browser.
+</Info>

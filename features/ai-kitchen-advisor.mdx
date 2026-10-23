@@ -1,0 +1,133 @@
+---
+title: "AI Kitchen Advisor: Turn Reviews Into Kitchen Wins"
+sidebarTitle: "Kitchen Advisor"
+description: "Gemini-powered analysis of your customer reviews that shows what's working, what needs fixing, and what to do next — all linked back to real feedback."
+---
+
+The AI Kitchen Advisor reads your customers' written reviews and returns a structured, evidence-linked summary across three columns: what they love, what needs attention, and what to do next. Every finding links back to the reviews that support it, so you can judge for yourself before acting on any suggestion.
+
+<Info>
+  Navigate to the advisor from the owner navbar: **AI Kitchen Advisor**. The path is `/owner/kitchen-advisor`. Old `/owner/smarter-meals` bookmarks redirect there automatically.
+</Info>
+
+## How it works
+
+<Steps>
+  <Step title="Open AI Kitchen Advisor">
+    Log in as an owner and click **AI Kitchen Advisor** in the navbar.
+  </Step>
+  <Step title="Choose your review source">
+    Pick **My customer reviews** to analyze real feedback, or **Try sample reviews** to see how the feature works without touching your database.
+  </Step>
+  <Step title="Select a review period">
+    For real reviews, choose the **last 7 days** or **last 30 days**. Up to 100 reviews are loaded per request.
+  </Step>
+  <Step title="Expand the source reviews">
+    Open **Read the source reviews** to see exactly what is being sent for analysis before you proceed.
+  </Step>
+  <Step title="Click Analyze feedback">
+    The advisor calls Gemini and returns a three-column summary. Each finding shows its supporting reviews. Expand any finding to read them.
+  </Step>
+</Steps>
+
+## Two analysis modes
+
+<CardGroup cols={2}>
+  <Card title="My customer reviews" icon="users">
+    Analyzes up to 100 reviews from the last 7 or 30 days for your mess only. Average ratings and counts are calculated by Smart Mess — not invented by the AI. Names and account details are excluded from the payload before it leaves your server.
+  </Card>
+  <Card title="Try sample reviews" icon="flask">
+    Uses a fixed set of fictional reviews. The banner clearly labels them as fictional. No rows are written to your database. Safe to use during a demo or when you have no written reviews yet.
+  </Card>
+</CardGroup>
+
+## Privacy and data handling
+
+Before any review text is sent to Gemini, Smart Mess applies the following protections:
+
+- **Names and account details** are excluded from the payload entirely.
+- **Email addresses** found in review comments are replaced with `[email removed]`.
+- **Phone-like strings** (10+ digits, with common separators) are replaced with `[phone removed]`.
+
+Free-form review text may still contain personal information your customers chose to write. The AI advisor never edits menus, sends messages, or writes any database rows.
+
+<Warning>
+  Results are suggestions, not guaranteed facts. The model's interpretation of evidence IDs is validated, but every finding still needs your review before you act on it.
+</Warning>
+
+## Configuration
+
+Add both variables to `backend/.env` (never to a `VITE_`-prefixed frontend variable):
+
+```dotenv
+GEMINI_API_KEY=your_private_key
+KITCHEN_ADVISOR_MODEL=gemini-3.1-flash-lite
+```
+
+Restart the backend after changing these values. No database migration or new dependency is required.
+
+<Tip>
+  `KITCHEN_ADVISOR_MODEL` defaults to `gemini-3.1-flash-lite`. You can point it at any compatible Gemini model, but the default balances speed and cost well for this use case.
+</Tip>
+
+## Caching and rate limits
+
+| Behaviour | Detail |
+|---|---|
+| Result cache | 15 minutes per owner per backend worker; resets on backend restart |
+| Per-owner cooldown | 15 seconds between analysis requests |
+| Cache scope | In-memory per worker — not shared across multiple Render instances |
+
+A cached result is returned with `"cached": true` in the API response.
+
+## API reference
+
+<CodeGroup>
+```http GET reviews
+GET /owner/kitchen-advisor/reviews?days=7&demo=false
+```
+
+```http POST analyze
+POST /owner/kitchen-advisor/analyze
+Content-Type: application/json
+
+{
+  "days": 7,
+  "language": "en",
+  "demo": false
+}
+```
+</CodeGroup>
+
+The `GET /reviews` endpoint returns raw review data (ratings, masked comments, counts, average). The `POST /analyze` endpoint calls Gemini and returns the structured `Advice` object with `positives`, `issues`, and `actions` arrays — each item containing a `title`, `detail`, and the `review_ids` that back it up.
+
+**Supported values:**
+- `days`: `7` or `30`
+- `language`: `"en"` or `"hi"`
+- `demo`: `true` or `false`
+
+## Cost and spending control
+
+The AI Kitchen Advisor makes real Gemini API calls when results are not cached. Charges accumulate against the Google Cloud project associated with your `GEMINI_API_KEY`.
+
+<Warning>
+  Configure **provider-side spending limits** in Google Cloud Console before using this feature in production. Smart Mess cannot enforce a spending cap on your behalf. Never place `GEMINI_API_KEY` in a `VITE_`-prefixed variable — that would expose it to every browser visitor.
+</Warning>
+
+## Limitations
+
+<Accordion title="What the AI Kitchen Advisor does not do">
+  - It never edits your menus or meal settings.
+  - It never sends messages to customers.
+  - It never writes to the reviews table — not even in sample mode.
+  - It will not invent dishes, complaints, or counts not present in the supplied reviews.
+  - An unavailable or misconfigured provider returns an explicit error, not a fabricated summary.
+</Accordion>
+
+## Running tests
+
+```bash
+python backend/run_tests.py --pattern test_kitchen_advisor.py
+```
+
+The test suite covers access controls, owner isolation, review periods, sample mode, cache expiry, email/phone redaction, provider quota errors, and unsupported evidence references.

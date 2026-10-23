@@ -1,0 +1,162 @@
+{
+  "projectType": "saas",
+  "projectName": "Smart Mess",
+  "projectDescription": "A full-stack mess and tiffin management platform for owners to manage subscriptions, meals, payments, and delivery, and for customers to order food, track bills, and leave reviews.",
+  "theme": "almond",
+  "primaryColor": "#17774e",
+  "lightColor": "#8727fc",
+  "darkColor": "#8c51fc",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "deployment"
+            ]
+          },
+          {
+            "group": "Owner Guide",
+            "pages": [
+              "owner/dashboard",
+              "owner/manage-meals",
+              "owner/subscriptions-plans",
+              "owner/payments",
+              "owner/delivery",
+              "owner/public-profile"
+            ]
+          },
+          {
+            "group": "Customer Guide",
+            "pages": [
+              "customer/dashboard",
+              "customer/ordering",
+              "customer/bills-payments",
+              "customer/pause-skip",
+              "customer/reviews"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/ai-kitchen-advisor",
+              "features/ai-menu-photos",
+              "features/in-app-chat",
+              "features/multilingual"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment",
+              "configuration/database-migrations",
+              "configuration/authentication"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/meals",
+              "api/subscriptions",
+              "api/billing-payments",
+              "api/delivery",
+              "api/reviews"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-mess tenancy — each owner manages an independent mess with scoped menus, plans, customers, and payments",
+    "Subscription management — weekly, monthly, trial, and custom-duration plans with owner approval workflow",
+    "Single-meal (à la carte) ordering — customers can order one published meal without a subscription",
+    "Meal skip and pause — customers skip individual meals or pause a date range before the cutoff time",
+    "Guest meal booking — customers add guests to a meal and the bill updates automatically",
+    "Owner-confirmed payment workflow — customers submit payment screenshots; owner confirms receipts and updates balances",
+    "Delivery tracking — owners mark meals as preparing, out for delivery, or delivered; customers see live status",
+    "AI Kitchen Advisor — analyzes customer reviews with Gemini to surface actionable kitchen improvements",
+    "AI menu photo generation — Cloudflare Workers AI generates food photos automatically from the menu text",
+    "In-app owner/customer chat — real-time floating chat widget with unread badges and idempotent retries",
+    "English/Hindi localization — i18next UI translations plus Google Translate for saved descriptions",
+    "Join QR code — owners share a reusable QR; customers self-register and wait for approval",
+    "Public mess page — no-login landing page showing menus, plans, timings, and public reviews",
+    "Downloadable receipts — customers view confirmed payment receipts inside the Bills section",
+    "OTP signup verification — optional Twilio SMS or console-mode OTP for phone verification"
+  ],
+  "publicApiSurface": [
+    "POST /auth/signup",
+    "POST /auth/login",
+    "GET /auth/registration-status",
+    "POST /auth/signup/otp",
+    "POST /auth/signup/verify-otp",
+    "GET /public/menu",
+    "GET /public/plans",
+    "GET /public/reviews",
+    "GET /meals/today",
+    "GET /meals/upcoming",
+    "POST /meals/skip",
+    "POST /meals/undo-skip",
+    "POST /meals/add-guest",
+    "GET /meals/history",
+    "GET /dashboard/headcount",
+    "GET /owner/meals",
+    "POST /owner/meals",
+    "PUT /owner/meals/{meal_id}",
+    "DELETE /owner/meals/{meal_id}",
+    "GET /owner/offers",
+    "POST /owner/offers",
+    "DELETE /owner/offers/{offer_id}",
+    "POST /subscriptions/requests",
+    "GET /subscriptions/requests",
+    "PATCH /subscriptions/requests/{request_id}",
+    "GET /subscriptions/current",
+    "GET /subscriptions/pause-preview",
+    "POST /subscriptions/pause",
+    "GET /billing/current",
+    "GET /billing/history",
+    "GET /payments/history",
+    "GET /payments/methods",
+    "POST /owner/payments",
+    "PUT /owner/payment-methods",
+    "POST /owner/payment-qr",
+    "GET /delivery/address",
+    "PUT /delivery/address",
+    "GET /owner/deliveries",
+    "PUT /owner/deliveries",
+    "GET /delivery/status",
+    "POST /reviews",
+    "GET /reviews/eligible",
+    "GET /owner/reviews",
+    "GET /join/{token}",
+    "POST /join/{token}",
+    "GET /owner/join-link",
+    "GET /owner/join-requests",
+    "PATCH /owner/join-requests/{request_id}",
+    "POST /customer/a-la-carte/orders",
+    "GET /customer/a-la-carte/orders",
+    "GET /owner/a-la-carte/orders",
+    "GET /conversations",
+    "GET /messages",
+    "POST /messages",
+    "GET /owner/kitchen-advisor/reviews",
+    "POST /owner/kitchen-advisor/analyze",
+    "GET /translations"
+  ]
+}

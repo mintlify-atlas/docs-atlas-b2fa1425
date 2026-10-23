@@ -1,0 +1,457 @@
+---
+title: "Meal Endpoints: Today, Upcoming, Skips & À La Carte"
+sidebarTitle: "Meals"
+description: "Complete reference for customer meal views, owner meal management, public menu discovery, and à la carte ordering in Smart Mess API."
+---
+
+Meals are the heartbeat of Smart Mess. Every subscription revolves around published meals that the owner creates and customers act on. This page covers every meal-related endpoint — customer views, owner management, the public discovery menu, and the à la carte catalogue — so you can build or integrate with confidence.
+
+<Info>
+  All endpoints are scoped to a single mess via the authenticated session or the `mess_token` query parameter on public routes. Owners and customers see only data that belongs to their mess.
+</Info>
+
+---
+
+## Customer Meal Endpoints
+
+These endpoints are available to authenticated users with the **customer** role.
+
+### `GET /meals/today`
+
+Returns all meals scheduled for today, enriched with the customer's per-meal status and subscription coverage flags.
+
+**Auth:** Customer
+
+<CodeGroup>
+```bash Request
+GET /meals/today
+Authorization: Bearer <token>
+```
+
+```json Response
+[
+  {
+    "id": 42,
+    "date": "2025-07-18",
+    "meal_type": "lunch",
+    "menu_description": "Dal Makhani, Jeera Rice, Roti",
+    "is_complimentary": true,
+    "cutoff_time": "2025-07-18T06:30:00",
+    "status": "confirmed",
+    "image_url": "/images/lunch-42.jpg",
+    "single_price": null,
+    "can_manage": true,
+    "booked": true
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="id" type="integer">Unique meal ID.</ResponseField>
+<ResponseField name="date" type="string (date)">ISO 8601 date the meal is served.</ResponseField>
+<ResponseField name="meal_type" type="string">One of `breakfast`, `lunch`, or `dinner`.</ResponseField>
+<ResponseField name="menu_description" type="string | null">Human-readable dish list.</ResponseField>
+<ResponseField name="is_complimentary" type="boolean">Whether the meal is included at no extra charge in the subscription.</ResponseField>
+<ResponseField name="cutoff_time" type="string (datetime) | null">UTC datetime after which no further skip/guest actions are accepted.</ResponseField>
+<ResponseField name="status" type="string">Customer's current status for this meal: `confirmed`, `skipped`, or `guest_added`.</ResponseField>
+<ResponseField name="image_url" type="string | null">URL of the meal image, if uploaded by the owner.</ResponseField>
+<ResponseField name="single_price" type="number | null">Per-meal price set by the owner; non-null means à la carte ordering is available.</ResponseField>
+<ResponseField name="can_manage" type="boolean">`true` when the customer's active subscription covers this meal and it can be skipped or have a guest added.</ResponseField>
+<ResponseField name="booked" type="boolean">`true` when any active plan (including à la carte) covers this meal.</ResponseField>
+
+---
+
+### `GET /meals/upcoming`
+
+Returns all meals from today onwards in chronological order.
+
+**Auth:** Customer
+
+<Note>
+  The weekly menu is synced automatically before each response. Meals generated from the weekly template appear here as soon as they fall within the rolling window.
+</Note>
+
+Response shape is identical to `GET /meals/today`.
+
+---
+
+### `GET /meals/history`
+
+Returns the full list of meal orders ever created for the authenticated customer, most-recent first.
+
+**Auth:** Customer
+
+<CodeGroup>
+```bash Request
+GET /meals/history
+Authorization: Bearer <token>
+```
+
+```json Response
+[
+  {
+    "id": 88,
+    "meal_id": 42,
+    "status": "skipped",
+    "extra_items": null,
+    "extra_cost": 0.0,
+    "meal": {
+      "id": 42,
+      "date": "2025-07-18",
+      "meal_type": "lunch",
+      "menu_description": "Dal Makhani, Jeera Rice, Roti",
+      "is_complimentary": true,
+      "cutoff_time": "2025-07-18T06:30:00",
+      "status": "skipped",
+      "image_url": null,
+      "single_price": null,
+      "can_manage": false,
+      "booked": true
+    }
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="id" type="integer">Meal order record ID.</ResponseField>
+<ResponseField name="meal_id" type="integer">ID of the associated meal.</ResponseField>
+<ResponseField name="status" type="string">`confirmed`, `skipped`, or `guest_added`.</ResponseField>
+<ResponseField name="extra_items" type="string | null">Human-readable description of guest additions.</ResponseField>
+<ResponseField name="extra_cost" type="number">Monetary total of any guest or à la carte additions on this order.</ResponseField>
+<ResponseField name="meal" type="object">Full `MealOut` object (see above) for the associated meal.</ResponseField>
+
+---
+
+### `GET /meals/guest-price`
+
+Returns the owner-configured guest meal price for the current mess.
+
+**Auth:** Customer
+
+```json Response
+{ "price": 60.0 }
+```
+
+<ResponseField name="price" type="number">Per-guest charge in the mess's local currency (default `50.00` if not configured).</ResponseField>
+
+---
+
+### `POST /meals/skip`
+
+Skips a single meal. The subscription is extended by one day for each skip (the end date moves forward). Blocked when the meal has been dispatched, the cutoff has passed, or no active subscription covers the meal.
+
+**Auth:** Customer
+
+<ParamField body="meal_id" type="integer" required>ID of the meal to skip.</ParamField>
+
+<CodeGroup>
+```json Request body
+{ "meal_id": 42 }
+```
+
+```json Response
+{
+  "message": "Meal skipped. One day added to your subscription.",
+  "meal_id": 42,
+  "status": "skipped",
+  "skip_count": 3,
+  "end_date": "2025-08-19"
+}
+```
+</CodeGroup>
+
+<ResponseField name="skip_count" type="integer">Cumulative number of extension days added to the subscription.</ResponseField>
+<ResponseField name="end_date" type="string (date)">New end date after applying the extension.</ResponseField>
+
+<Warning>
+  Skipping after a guest has already been added (`guest_added` status) returns **HTTP 409**. Undo the guest first. Trying to skip a dispatched meal (`out_for_delivery` or `delivered`) also returns **HTTP 400**.
+</Warning>
+
+---
+
+### `POST /meals/undo-skip`
+
+Reverses a previous skip, removes the one-day extension, and restores the meal to `confirmed`. Only available before the cutoff.
+
+**Auth:** Customer
+
+<ParamField body="meal_id" type="integer" required>ID of the previously skipped meal.</ParamField>
+
+```json Response
+{
+  "message": "Meal skip cancelled successfully",
+  "meal_id": 42,
+  "status": "confirmed"
+}
+```
+
+<Warning>
+  Returns **HTTP 400** if the cutoff time has already passed.
+</Warning>
+
+---
+
+### `POST /meals/add-guest`
+
+Adds one or more guest portions to a meal. The extra cost is calculated as `guest_count × single_price` and added to the customer's bill. Requires the owner to have set a `single_price` on the meal.
+
+**Auth:** Customer
+
+<ParamField body="meal_id" type="integer" required>ID of the meal to add guests to.</ParamField>
+<ParamField body="guest_count" type="integer">Number of guest portions (1–100, default `1`).</ParamField>
+<ParamField body="expected_unit_price" type="number">Optional price guard — if provided and the current `single_price` differs, the request fails with **HTTP 409** so the customer can confirm the new total.</ParamField>
+
+```json Response
+{
+  "message": "Guest added successfully",
+  "meal_id": 42,
+  "status": "guest_added"
+}
+```
+
+<Warning>
+  Returns **HTTP 409** if `single_price` is `null` or `≤ 0`. The owner must set a price before guests can be booked.
+</Warning>
+
+---
+
+## Owner Meal Endpoints
+
+These endpoints require the **owner** role.
+
+### `GET /owner/meals`
+
+Lists all upcoming meals (today and future) for the owner's mess, ordered by date then cutoff time.
+
+**Auth:** Owner
+
+Response is a list of `MealOut` objects (see the field table above).
+
+---
+
+### `POST /owner/meals`
+
+Creates a new meal. Each owner can have at most one meal per `(date, meal_type)` combination.
+
+**Auth:** Owner
+
+<ParamField body="date" type="string (date)" required>The date this meal is served (`YYYY-MM-DD`).</ParamField>
+<ParamField body="meal_type" type="string" required>`breakfast`, `lunch`, or `dinner`.</ParamField>
+<ParamField body="menu_description" type="string">Comma-separated list of dishes.</ParamField>
+<ParamField body="cutoff_time" type="string (datetime)">UTC datetime after which customers can no longer skip or add guests. If omitted, no cutoff is enforced.</ParamField>
+<ParamField body="is_complimentary" type="boolean">Whether the meal is included in the base subscription price (default `true`).</ParamField>
+<ParamField body="image_url" type="string">URL of an image uploaded via the image upload endpoint.</ParamField>
+<ParamField body="single_price" type="number">Per-meal price (0.01–10000). Setting this enables à la carte ordering and guest additions for this meal.</ParamField>
+
+Returns the created `MealOut` object with HTTP **201**.
+
+<Note>
+  Creating a meal that matches an existing weekly template slot automatically sets `weekly_menu_override: true`, which prevents the template from overwriting the custom entry.
+</Note>
+
+---
+
+### `PUT /owner/meals/{meal_id}`
+
+Updates an existing meal. All fields are optional — only the provided fields are changed.
+
+**Auth:** Owner
+
+<ParamField path="meal_id" type="integer" required>ID of the meal to update.</ParamField>
+
+All body fields from `POST /owner/meals` are accepted as optional.
+
+<Warning>
+  Changing `date` or `meal_type` is blocked with **HTTP 409** if any customer has a booking, delivery record, review, or à la carte order tied to the meal.
+</Warning>
+
+---
+
+### `DELETE /owner/meals/{meal_id}`
+
+Permanently removes a meal.
+
+**Auth:** Owner
+
+<ParamField path="meal_id" type="integer" required>ID of the meal to delete.</ParamField>
+
+```json Response
+{ "message": "Meal deleted successfully" }
+```
+
+<Warning>
+  Returns **HTTP 400** if any customer activity (orders, delivery updates, reviews, or à la carte orders) exists for this meal. Returns **HTTP 409** if the meal was auto-generated from the weekly menu template — edit the template instead.
+</Warning>
+
+---
+
+## Public Meal Endpoints
+
+These endpoints require **no authentication**. They use the `mess_token` query parameter to scope results to a specific mess's public-facing page.
+
+### `GET /public/menu`
+
+Returns meals published for the next 7 days (today inclusive) for a given mess.
+
+**Auth:** None
+
+<ParamField query="mess_token" type="string" required>The public token identifying the mess (found in the mess's share link).</ParamField>
+
+Response is a list of `MealOut` objects.
+
+---
+
+### `GET /public/plans`
+
+Returns all active plan offers for a given mess, sorted by duration then price.
+
+**Auth:** None
+
+<ParamField query="mess_token" type="string" required>The public token identifying the mess.</ParamField>
+
+```json Response
+[
+  {
+    "id": 3,
+    "name": "Monthly Lunch",
+    "category": "regular",
+    "duration_days": 30,
+    "price": 2500.0,
+    "meal_types": ["lunch"],
+    "meal_price": 90.0,
+    "description": "Daily lunch from Monday to Saturday."
+  }
+]
+```
+
+---
+
+## À La Carte Endpoints
+
+À la carte lets customers order individual items (e.g., extra rotis, sweets) on top of their subscription meal. The feature has both a catalogue side (owner) and an ordering side (customer).
+
+<Note>
+  Customers must have a saved delivery address and an active subscription or confirmed single-meal booking before they can place an à la carte order.
+</Note>
+
+### Customer À La Carte
+
+#### `GET /customer/a-la-carte/items`
+
+Lists items available for a specific meal. Only items whose `meal_types` include the meal's type and that are marked `available` are returned.
+
+**Auth:** Customer
+
+<ParamField query="meal_id" type="integer" required>ID of the meal for which items are being browsed.</ParamField>
+
+```json Response
+{
+  "plan_id": 7,
+  "items": [
+    {
+      "id": 1,
+      "name": "Extra Roti",
+      "name_hi": "अतिरिक्त रोटी",
+      "description": "Freshly made wheat roti",
+      "description_hi": "",
+      "price": 10.0,
+      "available": true,
+      "meal_types": ["lunch", "dinner"]
+    }
+  ]
+}
+```
+
+<ResponseField name="plan_id" type="integer">The active plan ID that will be billed for orders on this meal.</ResponseField>
+<ResponseField name="items" type="array">List of available `ALaCarteItem` objects.</ResponseField>
+
+---
+
+#### `POST /customer/a-la-carte/orders`
+
+Places an à la carte order for a specific meal. Uses an idempotent `purchase_key` (UUID) to prevent duplicate submissions.
+
+**Auth:** Customer
+
+<ParamField body="meal_id" type="integer" required>ID of the meal.</ParamField>
+<ParamField body="plan_id" type="integer" required>Active subscription plan to bill against (returned by `GET /customer/a-la-carte/items`).</ParamField>
+<ParamField body="purchase_key" type="string (UUID)" required>Client-generated UUID for idempotency. Resubmitting the same key with the same details returns the existing order.</ParamField>
+<ParamField body="lines" type="array" required>
+  Array of order lines (1–30 distinct items):
+  - `item_id` (integer) — catalogue item ID
+  - `quantity` (integer, 1–100) — number of portions
+  - `expected_unit_price` (number) — price the customer confirmed; if it no longer matches, the request returns **HTTP 409**
+</ParamField>
+
+Returns the created order with HTTP **201**.
+
+<ResponseField name="id" type="integer">Order ID.</ResponseField>
+<ResponseField name="plan_id" type="integer">Billed plan ID.</ResponseField>
+<ResponseField name="meal_id" type="integer">Meal ID.</ResponseField>
+<ResponseField name="date" type="string (date)">Meal date.</ResponseField>
+<ResponseField name="meal_type" type="string">Meal type.</ResponseField>
+<ResponseField name="status" type="string">Order status (`confirmed`).</ResponseField>
+<ResponseField name="total" type="number">Grand total for the order.</ResponseField>
+<ResponseField name="lines" type="array">Per-item breakdown with `name`, `quantity`, `unit_price`.</ResponseField>
+
+---
+
+#### `GET /customer/a-la-carte/orders`
+
+Returns all à la carte orders placed by the customer.
+
+**Auth:** Customer
+
+<ParamField query="meal_id" type="integer">Optional filter by meal ID.</ParamField>
+
+---
+
+### Owner À La Carte
+
+#### `GET /owner/a-la-carte/items`
+
+Returns the full à la carte catalogue for the owner's mess.
+
+**Auth:** Owner
+
+---
+
+#### `POST /owner/a-la-carte/items`
+
+Creates a new catalogue item.
+
+**Auth:** Owner
+
+<ParamField body="name" type="string" required>Item name in English (1–100 chars).</ParamField>
+<ParamField body="name_hi" type="string">Item name in Hindi (optional, max 100 chars).</ParamField>
+<ParamField body="description" type="string">English description (max 500 chars).</ParamField>
+<ParamField body="description_hi" type="string">Hindi description (max 500 chars).</ParamField>
+<ParamField body="price" type="number" required>Unit price (0.01–10000).</ParamField>
+<ParamField body="available" type="boolean">Whether the item is currently orderable (default `true`).</ParamField>
+<ParamField body="meal_types" type="array" required>At least one of `breakfast`, `lunch`, `dinner`.</ParamField>
+
+Returns the created item with HTTP **201**.
+
+---
+
+#### `PUT /owner/a-la-carte/items/{item_id}`
+
+Replaces all fields of an existing catalogue item.
+
+**Auth:** Owner
+
+<ParamField path="item_id" type="integer" required>ID of the item to update.</ParamField>
+
+Body fields are identical to `POST /owner/a-la-carte/items`.
+
+---
+
+#### `GET /owner/a-la-carte/orders`
+
+Returns all à la carte orders placed at the owner's mess, most-recent first.
+
+**Auth:** Owner
+
+<ParamField query="meal_id" type="integer">Optional filter by meal ID.</ParamField>
+
+Each order includes `customer_name`, `customer_phone`, `address`, and `instructions` in addition to the standard order fields.

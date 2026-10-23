@@ -1,0 +1,125 @@
+---
+title: "AI Menu Photos: Auto-Generate Food Images From Menus"
+sidebarTitle: "Menu Photos"
+description: "Type a meal menu and Smart Mess generates a photorealistic food image via Cloudflare Workers AI — cached, previewed, and saved alongside your meal record."
+---
+
+When you type a meal menu in Manage Meals, Smart Mess automatically generates a photorealistic food photograph using Cloudflare Workers AI. The image previews in the form before you save, gets attached to the meal record, and is served directly from your backend — no third-party CDN required and no API credentials ever reach the browser.
+
+## How it works
+
+<Steps>
+  <Step title="Open Manage Meals and type a menu">
+    Start typing the menu for a new or existing meal (for example, "Dal Tadka, Jeera Rice, Roti, Salad").
+  </Step>
+  <Step title="Pause for two seconds">
+    After a two-second pause in typing, the backend triggers photo generation automatically. You'll see a preview spinner in the form.
+  </Step>
+  <Step title="Preview the generated photo">
+    The generated image appears in the meal form. Review it before saving.
+  </Step>
+  <Step title="Save the meal">
+    Click **Create Meal** or **Update Meal**. The photo URL is stored alongside the meal. Generation does not block saving — if a photo is not yet ready, the meal saves without one.
+  </Step>
+</Steps>
+
+<Tip>
+  Identical menus (case-insensitive, whitespace-normalised) reuse the cached image instantly — no extra API call is made and no quota is consumed.
+</Tip>
+
+## Caching and image reuse
+
+| Scenario | Behaviour |
+|---|---|
+| Same menu typed again | Cached image returned immediately; no new API request |
+| Menu text changed | Previous image is cleared; a new image is generated |
+| Existing meal before setup | Keeps its illustrative category photo until a generated image is saved |
+| Generation fails | Meal saves successfully without a photo; no second request is made automatically |
+| Setup failure (bad credentials) | Automatic retries stop until **Retry after fixing setup** is clicked |
+
+Images are stored on disk at `backend/generated_menu_images/` and served at the `/menu-images` static files endpoint.
+
+<Warning>
+  Keep the `backend/generated_menu_images/` folder when moving or redeploying the app. Losing it means previously generated images will no longer be available at their saved URLs, though the meals themselves remain intact.
+</Warning>
+
+## Configuration
+
+Add the following variables to `backend/.env`. **Never put them in a `VITE_`-prefixed variable** — they must stay on the backend only.
+
+```dotenv
+# Cloudflare Workers AI menu photos (backend only)
+CLOUDFLARE_API_TOKEN=your_workers_ai_api_token
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
+MENU_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
+```
+
+Restart the backend after editing `.env`. Then open the owner dashboard, enter a menu, or click **Retry after fixing setup** if a prior setup failure was detected.
+
+<Info>
+  `MENU_IMAGE_MODEL` defaults to `@cf/black-forest-labs/flux-1-schnell` (FLUX.1 Schnell). You can point it at another Cloudflare Workers AI image model, but this model is the recommended default for speed and quality.
+</Info>
+
+### Getting your Cloudflare credentials
+
+<Steps>
+  <Step title="Open Cloudflare Dashboard">
+    Go to **Workers AI → Use REST API** in your Cloudflare dashboard.
+  </Step>
+  <Step title="Create a Workers AI API token">
+    Use the **Create a Workers AI API Token** template. Grant **Workers AI Read** and **Workers AI Edit** permissions scoped to your account.
+  </Step>
+  <Step title="Copy the API token and account ID">
+    Paste both into `backend/.env`. Use the **API token** — not the Global API Key.
+  </Step>
+</Steps>
+
+<Warning>
+  Do not use your Cloudflare Global API Key. Always use a scoped Workers AI API token with Read and Edit permissions.
+</Warning>
+
+## Provider reference
+
+<CardGroup cols={2}>
+  <Card title="Cloudflare Workers AI REST API" icon="cloud" href="https://developers.cloudflare.com/workers-ai/get-started/rest-api/">
+    Official guide for the Workers AI REST API used by Smart Mess.
+  </Card>
+  <Card title="FLUX.1 Schnell model" icon="image">
+    Model identifier: `@cf/black-forest-labs/flux-1-schnell`. Optimised for fast, high-quality photorealistic image generation.
+  </Card>
+</CardGroup>
+
+## What happens when generation fails
+
+Smart Mess is designed so that photo generation never blocks meal saving:
+
+<Accordion title="Generation failure scenarios">
+  **Network error connecting to Cloudflare**
+  An explicit message says the backend cannot reach Cloudflare. The meal can still be saved without a photo.
+
+  **Invalid credentials (401/403)**
+  The UI shows a setup failure message and stops retrying automatically. Fix `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` in `backend/.env`, restart the backend, then click **Retry after fixing setup**.
+
+  **Rate limit hit (429)**
+  A quota or rate-limit message is shown. Wait for your Workers AI allowance to reset, or check your Workers AI limits in the Cloudflare dashboard.
+
+  **Model not found (404)**
+  Check `MENU_IMAGE_MODEL` and `CLOUDFLARE_ACCOUNT_ID` in `backend/.env`.
+
+  **No credentials configured**
+  The UI displays a setup message. Meals save normally without photos until credentials are added.
+</Accordion>
+
+## Images endpoint
+
+Generated photos are stored in `backend/generated_menu_images/` and served via:
+
+```
+GET /menu-images/{filename}
+```
+
+This is a static file mount — no authentication is required to load meal photos in public meal listings or customer-facing pages.
+
+## Quota and cost
+
+Photo generation consumes Workers AI quota from your Cloudflare account. Each unique menu triggers one API call; cached results consume no quota. Configure spending limits and Workers AI project quotas directly in the Cloudflare dashboard. Smart Mess cannot enforce a provider-side quota cap.

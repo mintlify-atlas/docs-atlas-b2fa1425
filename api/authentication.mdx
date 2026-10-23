@@ -1,0 +1,466 @@
+---
+title: "Smart Mess Authentication API — Endpoints Reference"
+sidebarTitle: "Authentication"
+description: "Full reference for all /auth endpoints: signup, login, OAuth2 token, OTP sending, and OTP verification — with request and response field details."
+---
+
+The `/auth` router handles all identity operations in Smart Mess — from first-time owner setup and customer registration through to login token issuance and the optional OTP verification flow. All endpoints in this group share the `/auth` prefix and are tagged `auth` in the Swagger UI. OTP behaviour is controlled by the `SIGNUP_OTP_MODE` environment variable (`off`, `console`, or `twilio`).
+
+---
+
+## GET /auth/registration-status
+
+Check whether the mess has been set up and retrieve the public join token. This endpoint requires **no authentication** and is called by the frontend before presenting the signup or login screen.
+
+### Response
+
+<ResponseField name="setup_available" type="boolean" required>
+  Always `true`. Indicates that the signup endpoint is accepting registrations.
+</ResponseField>
+
+<ResponseField name="mess_name" type="string | null">
+  The name of the mess if an owner account already exists, otherwise `null`.
+</ResponseField>
+
+<ResponseField name="join_token" type="string | null">
+  The public QR join token for the mess if one has been issued, otherwise `null`. Customers use this token to join the mess.
+</ResponseField>
+
+<CodeGroup>
+```http Request
+GET /auth/registration-status HTTP/1.1
+Host: 127.0.0.1:8001
+```
+
+```json Response — no owner yet
+{
+  "setup_available": true,
+  "mess_name": null,
+  "join_token": null
+}
+```
+
+```json Response — owner registered
+{
+  "setup_available": true,
+  "mess_name": "Sharma Tiffin House",
+  "join_token": "aB3xQ9rT..."
+}
+```
+</CodeGroup>
+
+---
+
+## POST /auth/signup
+
+Create a new user account. The first account created **must** be an `owner` and also provides the mess name. Subsequent accounts can be customers. When `SIGNUP_OTP_MODE` is not `off`, a verified `verification_id` must be supplied.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Full display name. 1–100 characters; cannot be blank or whitespace-only.
+</ParamField>
+
+<ParamField body="phone" type="string" required>
+  Ten-digit numeric phone number (e.g. `9876543210`). Must match the pattern `^[0-9]{10}$`. Must be unique — a 409 is returned if already registered.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Account password. Minimum 8 characters, maximum 72 bytes. Stored as a bcrypt hash.
+</ParamField>
+
+<ParamField body="role" type='"owner" | "customer"' required>
+  Account type. Use `"owner"` when setting up the mess for the first time. Use `"customer"` for subscriber accounts.
+</ParamField>
+
+<ParamField body="mess_name" type="string">
+  Name of the mess. **Required when `role` is `"owner"`**. Maximum 100 characters. Ignored for customer accounts.
+</ParamField>
+
+<ParamField body="verification_id" type="string | null">
+  The `verification_id` (also called `challenge_id`) returned by `POST /auth/signup/otp` after OTP verification. Required when `SIGNUP_OTP_MODE` is `console` or `twilio`. Pass `null` or omit when OTP mode is `off`.
+</ParamField>
+
+### Response — `schemas.UserOut`
+
+<ResponseField name="id" type="integer" required>
+  Auto-assigned primary key for the new user.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  The trimmed display name as stored.
+</ResponseField>
+
+<ResponseField name="phone" type="string" required>
+  The phone number associated with the account.
+</ResponseField>
+
+<ResponseField name="role" type="string" required>
+  The assigned role: `"owner"` or `"customer"`.
+</ResponseField>
+
+### Error Codes
+
+| Status | Condition |
+|---|---|
+| `409` | Phone number already registered |
+| `422` | Validation failure — blank name, missing mess name for owner, invalid role, password too short, or phone format mismatch |
+
+<CodeGroup>
+```json Owner signup request
+{
+  "name": "Ramesh Sharma",
+  "phone": "9876543210",
+  "password": "securepass1",
+  "role": "owner",
+  "mess_name": "Sharma Tiffin House",
+  "verification_id": null
+}
+```
+
+```json Customer signup request
+{
+  "name": "Priya Kulkarni",
+  "phone": "9123456780",
+  "password": "mypassword",
+  "role": "customer",
+  "verification_id": "chg_abc123xyz..."
+}
+```
+
+```json Success response (201)
+{
+  "id": 1,
+  "name": "Ramesh Sharma",
+  "phone": "9876543210",
+  "role": "owner"
+}
+```
+
+```json Error — phone conflict (409)
+{
+  "detail": "Phone number already registered"
+}
+```
+</CodeGroup>
+
+---
+
+## POST /auth/login
+
+Authenticate with phone number and password. Returns a signed JWT bearer token for use in the `Authorization` header of all subsequent protected requests. This is the **primary login endpoint** used by the React frontend.
+
+<Note>
+  Repeated failed logins are subject to rate limiting: **10 failed attempts per account** and **100 per IP** within a 15-minute window. Exceeding either limit returns HTTP 429 with a `Retry-After` header.
+</Note>
+
+### Request Body
+
+<ParamField body="phone" type="string" required>
+  The registered ten-digit phone number.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The account password.
+</ParamField>
+
+### Response
+
+<ResponseField name="access_token" type="string" required>
+  Signed JWT to use as `Authorization: Bearer <access_token>`. Default lifetime is 1 440 minutes (24 hours), configurable via `ACCESS_TOKEN_EXPIRE_MINUTES`.
+</ResponseField>
+
+<ResponseField name="token_type" type="string" required>
+  Always `"bearer"`.
+</ResponseField>
+
+<ResponseField name="role" type="string" required>
+  The role of the authenticated user: `"owner"` or `"customer"`. Provided as a convenience so the frontend can route to the correct dashboard without decoding the JWT.
+</ResponseField>
+
+### Error Codes
+
+| Status | Condition |
+|---|---|
+| `401` | Invalid phone number or password |
+| `429` | Rate limit exceeded; check the `Retry-After` response header |
+
+<CodeGroup>
+```json Request
+{
+  "phone": "9876543210",
+  "password": "securepass1"
+}
+```
+
+```json Success response (200)
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "role": "owner"
+}
+```
+
+```json Error — bad credentials (401)
+{
+  "detail": "Invalid phone number or password"
+}
+```
+
+```json Error — rate limited (429)
+{
+  "detail": "Too many login attempts. Please try again later."
+}
+```
+</CodeGroup>
+
+---
+
+## POST /auth/token
+
+OAuth2 password-flow token endpoint. Accepts `application/x-www-form-urlencoded` body. This is the endpoint wired to the **Authorize** button in the Swagger UI (`/docs`). It is functionally identical to `/auth/login` except it uses form data and does not return the `role` field.
+
+<Tip>
+  Use this endpoint only from Swagger UI or OAuth2-compliant tooling. Application code should use `POST /auth/login` instead.
+</Tip>
+
+### Request Form Fields
+
+<ParamField body="username" type="string" required>
+  The user's phone number. The OAuth2 spec uses the field name `username`; Smart Mess maps it to the phone column.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The account password.
+</ParamField>
+
+### Response
+
+<ResponseField name="access_token" type="string" required>
+  Signed JWT bearer token.
+</ResponseField>
+
+<ResponseField name="token_type" type="string" required>
+  Always `"bearer"`.
+</ResponseField>
+
+<CodeGroup>
+```http Request
+POST /auth/token HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+username=9876543210&password=securepass1
+```
+
+```json Success response (200)
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+</CodeGroup>
+
+---
+
+## GET /auth/signup/settings
+
+Returns the current OTP configuration so the frontend can decide whether to show the OTP verification step during signup. No authentication required.
+
+### Response
+
+<ResponseField name="demo_registration" type="boolean" required>
+  `true` when `SIGNUP_OTP_MODE=off`. In demo mode, signup completes without any OTP challenge.
+</ResponseField>
+
+<ResponseField name="otp_required" type="boolean" required>
+  `true` when `SIGNUP_OTP_MODE` is `console` or `twilio`. The frontend must complete the OTP flow before calling `POST /auth/signup`.
+</ResponseField>
+
+<CodeGroup>
+```http Request
+GET /auth/signup/settings HTTP/1.1
+Host: 127.0.0.1:8001
+```
+
+```json OTP disabled (demo mode)
+{
+  "demo_registration": true,
+  "otp_required": false
+}
+```
+
+```json OTP enabled
+{
+  "demo_registration": false,
+  "otp_required": true
+}
+```
+</CodeGroup>
+
+---
+
+## POST /auth/signup/otp
+
+Send a one-time password to the provided phone number. When `SIGNUP_OTP_MODE=twilio`, the code is delivered via SMS using the Twilio Verify service. When `SIGNUP_OTP_MODE=console`, the code is printed to the server console (useful for local development). Returns a `verification_id` (`challenge_id`) that must be passed to `/auth/signup/verify-otp` and ultimately to `POST /auth/signup`.
+
+<Warning>
+  Never expose `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, or `TWILIO_VERIFY_SERVICE_SID` to the frontend. These credentials must remain server-side only.
+</Warning>
+
+### Request Body
+
+<ParamField body="phone" type="string" required>
+  Ten-digit numeric phone number matching `^[0-9]{10}$`. The OTP will be sent to this number.
+</ParamField>
+
+<ParamField body="role" type='"customer" | "owner"'>
+  The intended role for the account being created. Defaults to `"owner"`. Influences the internal OTP scope.
+</ParamField>
+
+<ParamField body="join_token" type="string | null">
+  Optional. Supply the mess's public join token when a customer is onboarding through the QR join flow. When provided, the OTP scope is validated against the corresponding invite.
+</ParamField>
+
+### Response
+
+<ResponseField name="verification_id" type="string" required>
+  An opaque identifier (also referred to as `challenge_id` in the verify step) for this OTP challenge. Store this on the client and pass it to `POST /auth/signup/verify-otp` and then to `POST /auth/signup`.
+</ResponseField>
+
+<CodeGroup>
+```json Request
+{
+  "phone": "9876543210",
+  "role": "owner"
+}
+```
+
+```json Success response (200)
+{
+  "verification_id": "chg_XkQ9aT3bLmP..."
+}
+```
+</CodeGroup>
+
+---
+
+## POST /auth/signup/verify-otp
+
+Verify the six-digit OTP code the user received. A successful verification marks the challenge as complete. The `challenge_id` returned here should then be passed as `verification_id` in the `POST /auth/signup` body to link the verified phone to the new account.
+
+### Request Body
+
+<ParamField body="verification_id" type="string" required>
+  The `verification_id` returned by `POST /auth/signup/otp`. Also referred to internally as `challenge_id`. Minimum 20 characters, maximum 64 characters.
+</ParamField>
+
+<ParamField body="code" type="string" required>
+  The six-digit numeric OTP received via SMS or printed to the server console. Must match the pattern `^[0-9]{6}$`.
+</ParamField>
+
+### Response
+
+<ResponseField name="verified" type="boolean" required>
+  `true` if the code matched the challenge and the OTP is now marked as verified. Proceed to `POST /auth/signup` with the same `verification_id`.
+</ResponseField>
+
+### Error Codes
+
+| Status | Condition |
+|---|---|
+| `400` | Code is incorrect or the challenge has expired |
+| `422` | `verification_id` too short/long, or `code` not exactly six digits |
+
+<CodeGroup>
+```json Request
+{
+  "verification_id": "chg_XkQ9aT3bLmP...",
+  "code": "482910"
+}
+```
+
+```json Success response (200)
+{
+  "verified": true
+}
+```
+</CodeGroup>
+
+---
+
+## Complete Signup Flow
+
+The full OTP-gated registration sequence is:
+
+<Steps>
+  <Step title="Check OTP requirement">
+    Call `GET /auth/signup/settings`. If `otp_required` is `false`, skip to step 4.
+  </Step>
+  <Step title="Request OTP">
+    Call `POST /auth/signup/otp` with the user's phone and role. Save the returned `verification_id`.
+  </Step>
+  <Step title="Verify OTP">
+    Call `POST /auth/signup/verify-otp` with the `verification_id` and the six-digit code. Confirm `verified: true`.
+  </Step>
+  <Step title="Create account">
+    Call `POST /auth/signup` including the `verification_id`. On success, proceed to login.
+  </Step>
+  <Step title="Obtain token">
+    Call `POST /auth/login` with phone and password to receive the bearer token for all protected API calls.
+  </Step>
+</Steps>
+
+<Tabs>
+  <Tab title="OTP Enabled">
+    ```bash
+    # 1. Check settings
+    curl http://127.0.0.1:8001/auth/signup/settings
+
+    # 2. Send OTP
+    curl -X POST http://127.0.0.1:8001/auth/signup/otp \
+      -H "Content-Type: application/json" \
+      -d '{"phone": "9876543210", "role": "owner"}'
+
+    # 3. Verify OTP (use code from SMS or server console)
+    curl -X POST http://127.0.0.1:8001/auth/signup/verify-otp \
+      -H "Content-Type: application/json" \
+      -d '{"verification_id": "chg_XkQ9aT3bLmP...", "code": "482910"}'
+
+    # 4. Create account
+    curl -X POST http://127.0.0.1:8001/auth/signup \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "Ramesh Sharma",
+        "phone": "9876543210",
+        "password": "securepass1",
+        "role": "owner",
+        "mess_name": "Sharma Tiffin House",
+        "verification_id": "chg_XkQ9aT3bLmP..."
+      }'
+
+    # 5. Login
+    curl -X POST http://127.0.0.1:8001/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{"phone": "9876543210", "password": "securepass1"}'
+    ```
+  </Tab>
+  <Tab title="OTP Disabled (Demo)">
+    ```bash
+    # 1. Create account directly (no verification_id needed)
+    curl -X POST http://127.0.0.1:8001/auth/signup \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "Ramesh Sharma",
+        "phone": "9876543210",
+        "password": "securepass1",
+        "role": "owner",
+        "mess_name": "Sharma Tiffin House"
+      }'
+
+    # 2. Login
+    curl -X POST http://127.0.0.1:8001/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{"phone": "9876543210", "password": "securepass1"}'
+    ```
+  </Tab>
+</Tabs>

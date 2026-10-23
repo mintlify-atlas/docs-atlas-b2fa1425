@@ -1,0 +1,232 @@
+---
+title: "Smart Mess Database Migrations: System and Commands"
+sidebarTitle: "DB Migrations"
+description: "Run, inspect, and adopt Smart Mess database migrations safely — covering upgrade, status, legacy adoption, locking, and revision history."
+---
+
+Smart Mess uses an explicit, transactional migration system. The API server performs a **read-only schema version check** on startup and refuses to start against an out-of-date or unmigrated database — it never applies migrations itself. Migrations must be run as a separate, deliberate command before (or as a pre-deploy step alongside) starting the API.
+
+<Note>
+  On Render, set the **Pre-deploy command** to `python -m app.migrate upgrade`
+  (with Root Directory set to `backend`). This runs migrations before the new
+  API process starts, so startup validation always finds an up-to-date schema.
+</Note>
+
+---
+
+## Running migrations
+
+All commands must be run from the `backend/` directory with `DATABASE_URL` explicitly set in the environment. The migration runner never reads `backend/.env` or infers a fallback target.
+
+<Steps>
+  <Step title="Set DATABASE_URL">
+    Export the target database connection string in your shell. Never point
+    the migration command at a production database from a local terminal
+    without careful intent.
+
+    ```bash
+    export DATABASE_URL="postgresql://postgres:[PASSWORD]@db.xxxxx.supabase.co:5432/postgres"
+    ```
+  </Step>
+
+  <Step title="Inspect pending revisions (optional but recommended)">
+    Run `status` first for a read-only inventory of applied and pending
+    revisions, missing columns, missing indexes, and any unsupported legacy
+    schema shapes. No schema changes are made.
+
+    ```bash
+    cd backend
+    python -m app.migrate status
+    ```
+
+    The command prints a JSON report including:
+    - `applied` — revisions already recorded in the database
+    - `pending` — revisions that have not yet been applied
+    - `missing` — tables or columns the ORM expects but the database lacks
+    - `unsupported_missing_columns` — columns that are missing and not handled
+      by the migration path (schema is too old or diverged)
+  </Step>
+
+  <Step title="Apply pending migrations">
+    For a **fresh database** or any database already versioned by a previous
+    `upgrade` run:
+
+    ```bash
+    cd backend
+    python -m app.migrate upgrade
+    ```
+
+    Applied revisions are skipped automatically, so it is safe to re-run.
+    The command prints a JSON object listing the revisions it applied in this
+    run: `{"applied": ["0007_in_app_chat", "0008_kitchen_location"]}`.
+  </Step>
+</Steps>
+
+---
+
+## First-time adoption of an existing (legacy) database
+
+If you have a running installation that predates the explicit migration system, the version table (`app_schema_revisions`) will be absent. Running `upgrade` without a flag on such a database raises an error to prevent a blind stamp.
+
+<Warning>
+  Before adopting a legacy database, take a **verified backup** and rehearse
+  the migration on an isolated copy. Application writes should be quiescent
+  during legacy adoption to prevent partial-state conflicts.
+</Warning>
+
+<Steps>
+  <Step title="Review the status report">
+    ```bash
+    cd backend
+    python -m app.migrate status
+    ```
+
+    Read the `unsupported_missing_columns`, `unsupported_primary_keys`, and
+    `unsupported_column_types` fields. If any unsupported shapes are reported,
+    the migration cannot proceed and manual schema reconciliation is required.
+  </Step>
+
+  <Step title="Run the legacy upgrade">
+    Pass `--allow-legacy-upgrade` **once** to adopt the existing database.
+    This flag enables additive validation: required columns are checked,
+    legacy helper functions run inside a single transaction, and revision
+    `0001_baseline` is recorded only after successful validation.
+
+    ```bash
+    cd backend
+    python -m app.migrate upgrade --allow-legacy-upgrade
+    ```
+
+    Unsupported schemas or constraint failures roll back the entire transaction
+    rather than deleting or partially merging records.
+  </Step>
+
+  <Step title="Subsequent deployments">
+    After initial adoption, remove the `--allow-legacy-upgrade` flag from
+    your pre-deploy command. Subsequent runs apply only the pending revisions
+    and skip the legacy checks entirely.
+  </Step>
+</Steps>
+
+---
+
+## Concurrency and locking
+
+Smart Mess is safe to deploy across multiple workers or in rolling restarts.
+
+| Database | Lock mechanism |
+|---|---|
+| PostgreSQL | `pg_advisory_xact_lock` — transaction-scoped advisory lock (key `71404001`); only one migrator runs at a time |
+| SQLite | `BEGIN IMMEDIATE` — serialises concurrent writers at the connection level |
+
+<Tip>
+  If your PostgreSQL setup uses a connection pooler (such as PgBouncer in
+  transaction mode or Supabase's pooler on port 6543), use a **direct**
+  PostgreSQL connection URL for the migration command. Poolers that intercept
+  or re-route DDL statements can break advisory locks and ALTER TABLE
+  transactions. Switch back to the pooler URL for the API start command
+  after migrations finish.
+</Tip>
+
+---
+
+## Revision history
+
+The following revisions are defined in `REVISIONS` order. Each revision is
+applied exactly once and skipped on all subsequent runs.
+
+<Accordion title="0001_baseline — full schema creation">
+  Creates all core tables (`users`, `meals`, `meal_plans`, `meal_orders`,
+  `bills`, `feedback`, `plan_requests`, `plan_offers`, `delivery_profiles`,
+  `delivery_updates`, `payment_records`, `payment_settings`, `issued_bills`,
+  `payment_submissions`, `join_requests`, `join_selections`, `guest_pricing`,
+  `mess_installation`, `mess_profiles`, `signup challenges`, etc.) and applies
+  all legacy additive column helpers in a single transaction. Backfills
+  existing records with the original mess owner without changing record IDs
+  or passwords. The installation anchor in `mess_installation` is preserved.
+</Accordion>
+
+<Accordion title="0002_concurrency_invariants — unique indexes for race-free operations">
+  Adds partial and composite unique indexes that prevent duplicate records
+  under concurrent API requests:
+
+  | Index | Table | Columns |
+  |---|---|---|
+  | `uq_meals_owner_date_type` | `meals` | `owner_id, date, meal_type` |
+  | `uq_meal_orders_user_meal` | `meal_orders` | `user_id, meal_id` |
+  | `uq_feedback_user_meal` | `feedback` | `user_id, meal_id` |
+  | `uq_delivery_updates_user_meal` | `delivery_updates` | `user_id, meal_id` |
+  | `uq_payment_submissions_pending_bill` | `payment_submissions` | `bill_id` WHERE `status = 'pending'` |
+
+  Before creating each index the migration scans for existing duplicate rows
+  and raises an error (rolling back) rather than silently dropping them.
+</Accordion>
+
+<Accordion title="0003_pause_date_credits — per-date skip credit tracking">
+  Adds `extension_credit BOOLEAN NOT NULL DEFAULT TRUE` to `meal_orders`.
+  Preserves all existing skip credits while allowing new pauses to credit
+  exactly once per calendar date.
+</Accordion>
+
+<Accordion title="0004_weekly_menu — recurring weekday menu templates">
+  Creates the `weekly_menu_entries` table and adds `weekly_menu_entry_id` and
+  `weekly_menu_override` columns to `meals`. Adds a covering index on
+  `meals(weekly_menu_entry_id)`. Existing meal rows are unchanged.
+</Accordion>
+
+<Accordion title="0005_multi_mess_memberships — one account, multiple messes">
+  Removes the legacy unique constraint that limited one account to one mess
+  and replaces it with a `(owner_id, user_id)` composite unique index on
+  `join_requests`. On SQLite this requires a full table rebuild; foreign key
+  integrity is validated before the migration commits.
+</Accordion>
+
+<Accordion title="0006_business_details — extended public mess profile">
+  Adds optional public profile columns to `mess_profiles`:
+  `owner_name`, `business_type`, `tagline`, `food_type`, `service_type`,
+  `operating_days`, `opening_time`, `closing_time`, `city`, `area`,
+  `fssai_number`, `business_status`. All new columns default to an empty
+  string; existing profile rows are unaffected.
+</Accordion>
+
+<Accordion title="0007_in_app_chat — owner–customer messaging">
+  Creates the `chat_messages` table used by the real-time in-app chat
+  feature between owners and their customers.
+</Accordion>
+
+<Accordion title="0008_kitchen_location — GPS coordinates on mess profile">
+  Adds nullable `latitude FLOAT` and `longitude FLOAT` columns to
+  `mess_profiles` for mapping and delivery range features.
+</Accordion>
+
+<Accordion title="0009_a_la_carte — individual item ordering">
+  Creates three new tables (`a_la_carte_items`, `a_la_carte_orders`,
+  `a_la_carte_order_lines`) and adds `extra_lines JSON NOT NULL DEFAULT '[]'`
+  to `issued_bills` for itemised bill display.
+</Accordion>
+
+---
+
+## What migrations do (and don't do)
+
+<CardGroup cols={2}>
+  <Card title="Additive only" icon="plus">
+    Every revision adds new tables, columns, or indexes. No existing rows are
+    deleted or overwritten. Backfills supply default values for new nullable or
+    defaulted columns.
+  </Card>
+  <Card title="Transactional" icon="shield-check">
+    Each revision runs inside a single database transaction. A constraint
+    failure or validation error rolls back the entire revision — no partial
+    state is left behind.
+  </Card>
+  <Card title="Idempotent" icon="rotate">
+    Already-applied revisions are recorded in `app_schema_revisions` and
+    skipped on every subsequent run. Re-running `upgrade` against a
+    fully-migrated database is always safe.
+  </Card>
+  <Card title="No downgrade" icon="ban">
+    There is no `downgrade` command. Reverting to a previous schema requires
+    restoring from a database backup taken before the migration.
+  </Card>
+</CardGroup>

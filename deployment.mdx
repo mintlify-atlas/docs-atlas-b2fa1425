@@ -1,0 +1,196 @@
+---
+title: "Deploy Smart Mess: Render Backend & Vercel Frontend"
+sidebarTitle: "Deployment"
+description: "Configure Render for the FastAPI backend, Vercel for the React frontend, set required env vars, run production migrations, and secure your SECRET_KEY."
+---
+
+Smart Mess is designed to be deployed with the FastAPI backend on Render and the React/Vite frontend on Vercel, backed by a managed PostgreSQL database (Supabase works well out of the box). This guide covers initial deployment, first-time database adoption, environment variable requirements, security considerations, and the auth rate-limiting behavior you need to be aware of before going live.
+
+<Warning>
+  The production backend on Render **refuses to start** if `DATABASE_URL` is missing, blank, or points to a SQLite file. Always configure a PostgreSQL connection string directly in Render's Environment settings before your first deploy.
+</Warning>
+
+## Backend on Render
+
+<Steps>
+  <Step title="Create or open your Render web service">
+    In the Render dashboard, create a new **Web Service** pointed at your repository. Set the **Root Directory** to `backend`. If you leave Root Directory blank, adjust the commands as noted below.
+  </Step>
+
+  <Step title="Configure the build and start commands">
+    Apply these settings in the Render service configuration:
+
+    | Setting | Value |
+    |---|---|
+    | **Root Directory** | `backend` |
+    | **Runtime** | Python |
+    | **Python version** | `3.12.11` (`PYTHON_VERSION=3.12.11` env var) |
+    | **Build command** | `pip install -r requirements.txt` |
+    | **Pre-deploy command** | `python -m app.migrate upgrade` |
+    | **Start command** | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` |
+    | **Branch** | `main` |
+
+    <Note>
+      If Root Directory is left blank, use `pip install -r backend/requirements.txt` as the build command, `PYTHONPATH=backend python -m app.migrate upgrade` as the pre-deploy command, and `uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT` as the start command.
+    </Note>
+  </Step>
+
+  <Step title="Set required environment variables">
+    Add these variables directly in **Render → Environment**. Never upload your local `backend/.env` to Render — it points to a local SQLite file and will cause the backend to refuse startup.
+
+    | Variable | Value |
+    |---|---|
+    | `DATABASE_URL` | Your PostgreSQL/Supabase connection string, e.g. `postgresql://postgres:[PASSWORD]@db.xxxxx.supabase.co:5432/postgres` |
+    | `SECRET_KEY` | A long, random, private string — **never rotated after first deploy** |
+    | `APP_ENV` | `production` |
+    | `PYTHON_VERSION` | `3.12.11` |
+
+    Optional variables:
+
+    | Variable | Purpose |
+    |---|---|
+    | `ALGORITHM` | JWT signing algorithm: `HS256` (default), `HS384`, or `HS512` |
+    | `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime in minutes (default: `1440`) |
+    | `GEMINI_API_KEY` / `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | AI menu photo generation |
+    | `GOOGLE_TRANSLATE_API_KEY` | Runtime Hindi translation of saved descriptions |
+    | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Customer registration emails |
+    | `SIGNUP_OTP_MODE` | `off` for demo/production without SMS; `twilio` for real OTP |
+
+    <Warning>
+      **`SECRET_KEY` must remain stable** across all workers and every restart. Rotating it immediately invalidates every outstanding login token and any pending console OTP challenges. Do not auto-generate a new secret during each deploy.
+    </Warning>
+  </Step>
+
+  <Step title="First-time database adoption (existing databases only)">
+    If you are migrating a database that existed before the explicit migration system was introduced, run a read-only status check first, then perform the one-time legacy adoption:
+
+    ```sh
+    # From Render Shell (Root Directory = backend)
+
+    # Step 1: Read-only inventory of pending revisions and legacy fields
+    python -m app.migrate status
+
+    # Step 2: Adopt the existing schema in a single transaction
+    python -m app.migrate upgrade --allow-legacy-upgrade
+    ```
+
+    <Info>
+      `--allow-legacy-upgrade` is an additive, transactional upgrade — not a blind stamp. Required columns are verified, legacy helpers run inside one transaction, and revision `0001_baseline` is recorded only after successful validation. Unsupported schemas or constraint failures roll back rather than deleting records. Run it only once. All subsequent deploys use the standard `python -m app.migrate upgrade` pre-deploy command.
+    </Info>
+
+    Fresh databases (no prior data) need only `python -m app.migrate upgrade` — no legacy flag required.
+  </Step>
+
+  <Step title="Verify the deployment">
+    Once Render reports the service as live:
+
+    - Open `https://<your-service>.onrender.com/` — you should see the API root response.
+    - Open `https://<your-service>.onrender.com/docs` — verify the interactive API docs load and `/customer/account` appears.
+
+    Use **Manual Deploy → Deploy latest commit** if auto-deploy does not trigger automatically.
+  </Step>
+</Steps>
+
+## Frontend on Vercel
+
+<Steps>
+  <Step title="Connect your repository to Vercel">
+    Create a new Vercel project linked to your repository. Vercel will auto-detect Vite.
+  </Step>
+
+  <Step title="Configure the project settings">
+    | Setting | Value |
+    |---|---|
+    | **Root Directory** | `frontend` |
+    | **Framework** | Vite |
+    | **Build command** | `npm run build` |
+    | **Output directory** | `dist` |
+    | **Production branch** | `main` |
+  </Step>
+
+  <Step title="Set the API URL environment variable">
+    In **Vercel → Project Settings → Environment Variables**, add:
+
+    | Variable | Value |
+    |---|---|
+    | `VITE_API_URL` | `https://<your-render-service>.onrender.com` |
+
+    This tells the production Vite build where to direct API requests. Alternatively, configure a reverse proxy that forwards `/api` to your Render backend URL — in that case, `VITE_API_URL` is not needed.
+
+    <Note>
+      Never prefix a server-side secret (such as `SECRET_KEY` or `GOOGLE_TRANSLATE_API_KEY`) with `VITE_`. Vite bakes `VITE_`-prefixed variables into the browser bundle at build time — they become publicly visible.
+    </Note>
+  </Step>
+
+  <Step title="Redeploy and verify">
+    Trigger a redeploy after saving the environment variable. Open your Vercel production URL and confirm:
+
+    - The homepage loads and shows the mess directory.
+    - Owner login at `/owner/login` reaches the Render backend.
+    - Customer login at `/login` reaches the Render backend.
+  </Step>
+</Steps>
+
+## Security reference
+
+### SECRET_KEY stability
+
+The `SECRET_KEY` is used to sign all JWT tokens. Once set in production:
+
+- Keep it identical across **all Render workers and every deploy**.
+- Do not regenerate it during redeploys or scaling events.
+- Store it as a Render secret environment variable, not in source code or `.env` files.
+- If you must rotate it (e.g., suspected compromise), all currently logged-in users will be signed out immediately and will need to log in again.
+
+### Auth rate limiting
+
+Smart Mess enforces two independent rate limits on every login and OTP endpoint:
+
+| Limit | Scope | Window | Response |
+|---|---|---|---|
+| 10 failed attempts | Per account | 15 minutes | `HTTP 429` with `Retry-After` seconds |
+| 100 failed attempts | Per client IP | 15 minutes | `HTTP 429` with `Retry-After` seconds |
+
+A **successful** authentication clears the per-account counter but does not reset the per-IP quota. Rate-limit state is stored in the `auth_attempt_buckets` table, which is managed by the standard migration command — no manual setup is needed.
+
+<Info>
+  Client IP is read from the ASGI connection, not from arbitrary forwarded headers. If you place a reverse proxy in front of Render, configure the proxy to set trusted forwarding headers and ensure only that proxy's address is trusted for client IP resolution.
+</Info>
+
+### Password policy
+
+New owner and customer accounts require passwords of **at least 8 characters** (maximum 72 UTF-8 bytes, the bcrypt limit). Existing passwords remain valid without a forced reset, including when an existing customer resubmits a join request through the same link.
+
+## Persistent file storage
+
+Two directories must survive Render redeploys:
+
+| Directory | Contents |
+|---|---|
+| `backend/payment_proofs/` | Customer payment screenshots (private, authenticated) |
+| `backend/generated_menu_images/` | AI-generated menu photos (cached per menu text) |
+
+Render's default filesystem does not persist files across deploys. Attach a [Render Disk](https://render.com/docs/disks) or use external object storage and update the backend paths accordingly before going live with real payment data.
+
+## Adding live demo data
+
+After a successful deployment, seed realistic demo data directly into the production database from the Render Shell:
+
+```sh
+# From Render Shell (Root Directory = backend)
+SEED_LIVE_DEMO=YES python seed_live_demo.py
+```
+
+The script creates a separate mess (Annapurna Homestyle Kitchen), 13 customers, 45 date-relative menus, 4 offers, 10 subscriptions, 2 paid personal meal orders, payment records, and 6 reviews. It preserves all existing data and refuses duplicate imports.
+
+<Warning>
+  Take a Supabase database snapshot before seeding. The demo seed is irreversible; there is no rollback or reset command. Never use `seed_local_realistic.py` to populate a live database.
+</Warning>
+
+Live demo accounts created by the seed:
+
+| Account | Phone | Password |
+|---|---|---|
+| Owner: Rajesh Kulkarni | `9100000001` | `DemoKitchen#2026!` |
+| Subscribed customer: Aarav Sharma | `9100000002` | `DemoKitchen#2026!` |
+| Customer (no subscription): Aditya Menon | `9100000014` | `DemoKitchen#2026!` |

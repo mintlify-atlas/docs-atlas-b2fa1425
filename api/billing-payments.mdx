@@ -1,0 +1,346 @@
+---
+title: "Billing & Payment Endpoints: Bills, Receipts & Methods"
+sidebarTitle: "Billing & Payments"
+description: "Complete reference for live bill calculation, bill history, payment recording, receipt downloads, and payment method configuration in Smart Mess."
+---
+
+Smart Mess uses a transparent, formula-driven billing model: the customer's bill is always the subscription base price minus skip deductions plus any guest or à la carte extras. Owners record payments manually and the system tracks balances in real time. This page documents every endpoint involved in billing and payments.
+
+<Info>
+  All monetary values are returned as floating-point numbers in the mess's local currency (Indian Rupees by default). The core billing formula is:
+  `final_amount = base_amount − deductions + extras_total`
+</Info>
+
+---
+
+## Customer Billing Endpoints
+
+### `GET /bills/current`
+
+Returns the customer's live, real-time bill for their currently active subscription. The bill recalculates every time it is fetched — no caching.
+
+**Auth:** Customer
+
+<CodeGroup>
+```bash Request
+GET /bills/current
+Authorization: Bearer <token>
+```
+
+```json Response
+{
+  "plan_id": 7,
+  "plan_type": "Monthly Lunch",
+  "meal_types": ["lunch"],
+  "start_date": "2025-08-01",
+  "end_date": "2025-08-30",
+  "month": "2025-08",
+  "base_amount": 2500.0,
+  "meal_price": 90.0,
+  "skipped_meals": 2,
+  "extension_days": 2,
+  "deductions": 180.0,
+  "extras_total": 60.0,
+  "extra_lines": [
+    {
+      "name": "Extra Roti",
+      "quantity": 3,
+      "unit_price": 10.0,
+      "total": 30.0
+    }
+  ],
+  "final_amount": 2380.0,
+  "amount_paid": 2000.0,
+  "balance_due": 380.0,
+  "credit": 0.0,
+  "breakdown": {
+    "formula": "base_amount - deductions + extras_total"
+  }
+}
+```
+</CodeGroup>
+
+<ResponseField name="plan_id" type="integer">Active subscription (MealPlan) ID.</ResponseField>
+<ResponseField name="plan_type" type="string">Human-readable plan name.</ResponseField>
+<ResponseField name="meal_types" type="array">Meal types included in the subscription.</ResponseField>
+<ResponseField name="start_date" type="string (date)">Original subscription start date.</ResponseField>
+<ResponseField name="end_date" type="string (date)">Current end date (extended by skips).</ResponseField>
+<ResponseField name="month" type="string">Calendar month of the request in `YYYY-MM` format.</ResponseField>
+<ResponseField name="base_amount" type="number">Full subscription price before any adjustments.</ResponseField>
+<ResponseField name="meal_price" type="number">Per-meal deduction amount configured for this plan.</ResponseField>
+<ResponseField name="skipped_meals" type="integer">Total meals skipped under this subscription.</ResponseField>
+<ResponseField name="extension_days" type="integer">Total days added to the subscription end date from skips.</ResponseField>
+<ResponseField name="deductions" type="number">Total amount deducted for skipped meals (`meal_price × skipped_meals` for non-extension skips).</ResponseField>
+<ResponseField name="extras_total" type="number">Total of all guest additions and à la carte orders billed against this subscription.</ResponseField>
+<ResponseField name="extra_lines" type="array">Itemised list of à la carte order lines contributing to `extras_total`.</ResponseField>
+<ResponseField name="final_amount" type="number">Calculated bill total (`base_amount − deductions + extras_total`, minimum 0).</ResponseField>
+<ResponseField name="amount_paid" type="number">Sum of all confirmed payment receipts for this subscription.</ResponseField>
+<ResponseField name="balance_due" type="number">Amount still owed (`max(final_amount − amount_paid, 0)`).</ResponseField>
+<ResponseField name="credit" type="number">Overpayment credit if `amount_paid > final_amount`.</ResponseField>
+<ResponseField name="breakdown.formula" type="string">Human-readable formula string for transparency.</ResponseField>
+
+<Note>
+  If the customer has no active subscription for today, this endpoint returns **HTTP 404**. Optionally pass `?plan_id=<id>` to fetch the bill for a specific subscription by ID.
+</Note>
+
+---
+
+### `GET /bills/history`
+
+Returns previously issued bill snapshots for the authenticated customer, most-recent first. These snapshots are created whenever an à la carte order is placed or a subscription is approved.
+
+**Auth:** Customer
+
+```json Response
+[
+  {
+    "id": 15,
+    "user_id": 14,
+    "month": "2025-07",
+    "base_amount": 2500.0,
+    "deductions": 90.0,
+    "extras_total": 0.0,
+    "final_amount": 2410.0,
+    "payment_status": "paid"
+  }
+]
+```
+
+<ResponseField name="id" type="integer">Bill record ID.</ResponseField>
+<ResponseField name="month" type="string">Billing month in `YYYY-MM` format.</ResponseField>
+<ResponseField name="base_amount" type="number">Base subscription price at the time the bill was generated.</ResponseField>
+<ResponseField name="deductions" type="number">Deductions applied at snapshot time.</ResponseField>
+<ResponseField name="extras_total" type="number">Extras billed at snapshot time.</ResponseField>
+<ResponseField name="final_amount" type="number">Final bill amount at snapshot time.</ResponseField>
+<ResponseField name="payment_status" type="string">Snapshot payment status: `pending` or `paid`.</ResponseField>
+
+---
+
+## Payment Method Endpoints
+
+### `GET /payments/methods`
+
+Returns the owner's configured payment methods. Visible to both owners and customers so customers know how to pay.
+
+**Auth:** Customer or Owner
+
+```json Response
+{
+  "payee_name": "Sharma Tiffin Service",
+  "upi_id": "sharma@upi",
+  "instructions": "Transfer to UPI and send the screenshot to WhatsApp.",
+  "qr_url": "/payment-images/abc123.png",
+  "cash_available": false
+}
+```
+
+<ResponseField name="payee_name" type="string">Display name of the payment recipient.</ResponseField>
+<ResponseField name="upi_id" type="string">UPI ID for direct transfers.</ResponseField>
+<ResponseField name="instructions" type="string">Free-text payment instructions (max 500 chars).</ResponseField>
+<ResponseField name="qr_url" type="string | null">URL of the QR code image, or `null` if no QR has been uploaded.</ResponseField>
+<ResponseField name="cash_available" type="boolean">Always `false` in the current API version; reserved for future use.</ResponseField>
+
+---
+
+### `PUT /owner/payment-methods`
+
+Updates the owner's UPI ID, payee name, and payment instructions.
+
+**Auth:** Owner
+
+<ParamField body="payee_name" type="string">Recipient display name (max 100 chars).</ParamField>
+<ParamField body="upi_id" type="string">UPI ID for customer payments (max 100 chars).</ParamField>
+<ParamField body="instructions" type="string">Payment instructions shown to customers (max 500 chars).</ParamField>
+
+```json Response
+{
+  "message": "Payment details saved",
+  "payee_name": "Sharma Tiffin Service",
+  "upi_id": "sharma@upi",
+  "instructions": "Transfer to UPI and send the screenshot to WhatsApp.",
+  "qr_url": "/payment-images/abc123.png",
+  "cash_available": false
+}
+```
+
+---
+
+### `POST /owner/payment-qr`
+
+Uploads a new QR code image. Replaces the previous QR if one exists.
+
+**Auth:** Owner
+
+<ParamField body="file" type="file" required>
+  Multipart form-data file upload. Accepted formats: **PNG** or **JPEG** only. Maximum size: **5 MB**.
+</ParamField>
+
+```json Response
+{
+  "message": "Payment QR uploaded. Customers can now view it in Bills.",
+  "qr_url": "/payment-images/newfile.png"
+}
+```
+
+<Warning>
+  Files that are not valid PNG or JPEG binaries are rejected with **HTTP 422**. Files exceeding 5 MB are rejected with **HTTP 413**.
+</Warning>
+
+---
+
+### `DELETE /owner/payment-qr`
+
+Removes the current QR code image from storage and clears the `qr_url`.
+
+**Auth:** Owner
+
+```json Response
+{
+  "message": "QR removed. Upload a QR to enable customer payment.",
+  "qr_url": null
+}
+```
+
+---
+
+## Payment Recording Endpoints
+
+### `GET /payments/history`
+
+Returns all confirmed payment receipts for the authenticated customer, most-recent first.
+
+**Auth:** Customer
+
+```json Response
+[
+  {
+    "id": 22,
+    "amount": 2000.0,
+    "reference": "UPI Ref 123456789",
+    "created_at": "2025-08-03T14:22:10",
+    "start_date": "2025-08-01",
+    "end_date": "2025-08-30"
+  }
+]
+```
+
+<ResponseField name="id" type="integer">Payment receipt ID (use with `GET /payments/receipts/{id}`).</ResponseField>
+<ResponseField name="amount" type="number">Amount received by the owner for this receipt.</ResponseField>
+<ResponseField name="reference" type="string">UPI reference number or note entered by the owner.</ResponseField>
+<ResponseField name="created_at" type="string (datetime)">UTC timestamp when the owner recorded the payment.</ResponseField>
+<ResponseField name="start_date" type="string (date)">Start date of the subscription this payment applies to.</ResponseField>
+<ResponseField name="end_date" type="string (date)">End date of the subscription this payment applies to.</ResponseField>
+
+---
+
+### `GET /payments/receipts/{receipt_id}`
+
+Downloads an HTML payment receipt for a specific confirmed payment. The HTML is formatted for printing or saving as PDF directly from the browser.
+
+**Auth:** Customer or Owner
+
+<ParamField path="receipt_id" type="integer" required>ID of the payment record.</ParamField>
+
+Returns an `text/html` document with `Content-Disposition: attachment`. The receipt includes:
+
+- Receipt number (formatted `SM-XXXXXX`)
+- Customer name and phone
+- Subscription dates and plan name
+- Any à la carte line items from the billed snapshot
+- Amount received
+
+<Note>
+  Customers can only download receipts for their own subscriptions. Owners can download any receipt in their mess.
+</Note>
+
+---
+
+### `GET /owner/payments`
+
+Returns a combined list of all customer balances for the owner's mess. Includes both customers with currently active subscriptions and customers with issued bills from future or single-meal plans.
+
+**Auth:** Owner
+
+Each item includes all fields from `GET /bills/current` for that customer, plus:
+
+<ResponseField name="user_id" type="integer">Customer user ID.</ResponseField>
+<ResponseField name="name" type="string">Customer full name.</ResponseField>
+<ResponseField name="phone" type="string">Customer phone number.</ResponseField>
+<ResponseField name="bill_generated" type="boolean">`true` when a matching `IssuedBill` snapshot already exists for the current amounts.</ResponseField>
+<ResponseField name="issued_bill_id" type="integer | null">ID of the most recent issued bill snapshot.</ResponseField>
+
+---
+
+### `GET /owner/payments/summary`
+
+Returns aggregate payment statistics for the owner's mess.
+
+**Auth:** Owner
+
+```json Response
+{
+  "total_received": 75400.0,
+  "payment_count": 38,
+  "month_received": 12500.0,
+  "month_payment_count": 6,
+  "month": "2025-08"
+}
+```
+
+<ResponseField name="total_received" type="number">All-time total of confirmed payments for this mess.</ResponseField>
+<ResponseField name="payment_count" type="integer">Total number of confirmed payment records.</ResponseField>
+<ResponseField name="month_received" type="number">Total payments received in the current calendar month (India time).</ResponseField>
+<ResponseField name="month_payment_count" type="integer">Number of payment records in the current month.</ResponseField>
+<ResponseField name="month" type="string">Current month in `YYYY-MM` format (India timezone).</ResponseField>
+
+---
+
+### `POST /owner/payments`
+
+Records a payment received from a customer and, if the balance is fully paid, activates the subscription.
+
+**Auth:** Owner
+
+<ParamField body="plan_id" type="integer" required>The `MealPlan` ID this payment applies to.</ParamField>
+<ParamField body="amount" type="number" required>Amount received (must be > 0 and ≤ current `balance_due`).</ParamField>
+<ParamField body="reference" type="string">UPI reference number, transaction note, or cash memo (max 200 chars).</ParamField>
+<ParamField body="receipt_key" type="string (UUID)" required>Client-generated UUID for idempotency. Resubmitting the exact same key + amount + reference returns the existing receipt without creating a duplicate.</ParamField>
+
+<CodeGroup>
+```json Request body
+{
+  "plan_id": 7,
+  "amount": 2500.00,
+  "reference": "UPI Ref 987654321",
+  "receipt_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```json Response
+{
+  "message": "Payment received from customer recorded",
+  "id": 22
+}
+```
+</CodeGroup>
+
+<ResponseField name="id" type="integer">ID of the newly created (or existing, for a duplicate key) payment receipt.</ResponseField>
+
+<Steps>
+  <Step title="Owner records payment">
+    Call `POST /owner/payments` with the plan ID, amount, UPI reference, and a fresh UUID `receipt_key`.
+  </Step>
+  <Step title="System validates balance">
+    Smart Mess checks the current `balance_due`. If `amount > balance_due`, the request is rejected with **HTTP 400**.
+  </Step>
+  <Step title="Subscription activates">
+    If the full `balance_due` is now covered, the subscription status changes from `pending_payment` to `active` automatically.
+  </Step>
+  <Step title="Receipt is available">
+    The customer can immediately download the receipt via `GET /payments/receipts/{id}`.
+  </Step>
+</Steps>
+
+<Warning>
+  Submitting the same `receipt_key` with different `plan_id`, `amount`, or `reference` values returns **HTTP 409** — the key is considered tampered. Generate a fresh UUID for every new payment.
+</Warning>

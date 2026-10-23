@@ -1,0 +1,75 @@
+---
+title: "Smart Mess: Multi-Tenant Tiffin Management Platform"
+sidebarTitle: "Introduction"
+description: "Learn what Smart Mess is, how the Owner and Customer roles work, the key features available, and the full-stack technology powering each component."
+---
+
+Smart Mess is a production-ready, full-stack platform that brings every aspect of running a tiffin or mess service into one place. Owners manage their kitchen operations — publishing daily menus, approving customer subscriptions, recording payments, tracking deliveries, and fielding reviews — while customers browse live menus, order food, pay through UPI or cash, and monitor their bills in real time. Every mess operates as a fully isolated tenant, so a single deployment can host multiple independent kitchens side by side, each with its own customers, plans, and payment history.
+
+## Two roles, one platform
+
+<CardGroup cols={2}>
+  <Card title="Owner" icon="store">
+    Register your mess, publish meal plans, approve customer subscriptions, track daily headcounts, record payments, and monitor delivery status — all from a single dashboard.
+  </Card>
+  <Card title="Customer" icon="user">
+    Browse a public mess page, join with a QR code, choose a subscription or single-meal order, pay via UPI scan or cash, skip meals before cut-off, and leave reviews.
+  </Card>
+</CardGroup>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Subscriptions & Plans" icon="calendar">
+    Owners publish trial, weekly, monthly, or custom-duration plans. Customers request a plan, and the subscription activates only after the owner confirms full payment.
+  </Card>
+  <Card title="Single-Meal Orders" icon="utensils">
+    Customers can purchase one published meal to taste the food before committing to a subscription. Owners set a separate per-meal price in Manage Meals.
+  </Card>
+  <Card title="Payment Workflow" icon="qrcode">
+    Owners upload a UPI QR code; customers scan it externally, then submit a screenshot and amount for owner confirmation. Receipts, balances, and credits are tracked in-app. No payment gateway is used.
+  </Card>
+  <Card title="Delivery Tracking" icon="truck">
+    Customers save a delivery address; owners advance meal status through Preparing → Out for Delivery → Delivered. Dispatched meals cannot be skipped.
+  </Card>
+  <Card title="AI Kitchen Advisor & Menu Photos" icon="sparkles">
+    Type a menu description and pause for two seconds — the backend generates a photo via Cloudflare Workers AI (FLUX.1 Schnell). Identical menus reuse a cached image; generation failures never block meal saving.
+  </Card>
+  <Card title="In-App Chat & Notifications" icon="bell">
+    Customers receive in-app notifications (polled every 15 seconds) when the owner generates a bill. Payment submissions, approvals, and rejections are all surfaced in-app.
+  </Card>
+  <Card title="English / Hindi i18n" icon="language">
+    UI strings are managed by i18next/react-i18next and persisted in the browser. Dynamic saved content (menus, offer descriptions, public mess details) is translated at runtime via the backend `/translations` endpoint using Google Cloud Translation (v2).
+  </Card>
+  <Card title="Multi-Mess Tenancy" icon="building">
+    Each owner receives a unique public page and customer join link with a QR code. Menus, plans, customers, billing, payments, and settings are all scoped to the owning mess in every API call.
+  </Card>
+</CardGroup>
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Backend | FastAPI · Python 3.12 · Uvicorn |
+| ORM & migrations | SQLAlchemy 2 · custom migration runner |
+| Database | PostgreSQL in production · SQLite for local dev |
+| Auth | JWT (HS256/HS384/HS512) · bcrypt · rate-limited login |
+| Frontend | React · Vite · i18next |
+| AI images | Cloudflare Workers AI — FLUX.1 Schnell |
+| Translations | Google Cloud Translation Basic v2 |
+| Deployment | Render (backend) · Vercel (frontend) |
+
+<Note>
+  SQLite is supported for local development only. The production backend on Render refuses to start if `DATABASE_URL` is missing or points to a SQLite file.
+</Note>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone the repo, spin up the backend and frontend locally, and log in with demo accounts in under ten minutes.
+  </Card>
+  <Card title="Deployment" icon="cloud" href="/deployment">
+    Deploy the FastAPI backend to Render and the React frontend to Vercel with a PostgreSQL database.
+  </Card>
+</CardGroup>

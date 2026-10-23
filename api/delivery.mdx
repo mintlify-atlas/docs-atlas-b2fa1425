@@ -1,0 +1,227 @@
+---
+title: "Delivery Endpoints: Addresses, Status & Dispatch Tracking"
+sidebarTitle: "Delivery"
+description: "Full reference for customer delivery address management, per-meal delivery status, and owner dispatch tracking for Smart Mess tiffin delivery."
+---
+
+Smart Mess does not use GPS or real-time location tracking. Instead, the owner manually advances each delivery through a simple three-stage pipeline — **preparing → out for delivery → delivered** — and customers see the current stage on their dashboard. Customers must save a delivery address before placing à la carte orders or being included in delivery runs.
+
+<Info>
+  Delivery status is reset fresh each day. Status updates apply only to today's active, non-skipped subscription meals. Once a meal is marked `out_for_delivery` or `delivered`, the customer can no longer skip it.
+</Info>
+
+---
+
+## Customer Delivery Endpoints
+
+### `GET /delivery/address`
+
+Returns the customer's saved delivery address and any special delivery instructions.
+
+**Auth:** Customer
+
+<CodeGroup>
+```bash Request
+GET /delivery/address
+Authorization: Bearer <token>
+```
+
+```json Response
+{
+  "address": "Room 12, Sunrise Hostel, FC Road, Pune - 411004",
+  "instructions": "Call before arriving. Leave at the gate if no answer."
+}
+```
+</CodeGroup>
+
+<ResponseField name="address" type="string">Saved delivery address (empty string if not yet set).</ResponseField>
+<ResponseField name="instructions" type="string">Optional special delivery instructions (empty string if not set).</ResponseField>
+
+---
+
+### `PUT /delivery/address`
+
+Creates or updates the customer's delivery address. Both `address` and `instructions` are stored at the mess level, so a customer with multiple mess subscriptions maintains one address per mess.
+
+**Auth:** Customer
+
+<ParamField body="address" type="string" required>Full delivery address. Must be at least 10 non-whitespace characters (max 500 chars).</ParamField>
+<ParamField body="instructions" type="string">Optional delivery instructions for the delivery person (max 250 chars).</ParamField>
+
+<CodeGroup>
+```json Request body
+{
+  "address": "Room 12, Sunrise Hostel, FC Road, Pune - 411004",
+  "instructions": "Call before arriving. Leave at the gate if no answer."
+}
+```
+
+```json Response
+{
+  "message": "Delivery address saved. Confirm delivery availability with your owner."
+}
+```
+</CodeGroup>
+
+<Warning>
+  An address shorter than 10 characters (after trimming whitespace) is rejected with **HTTP 422**. Customers who have not saved a valid address cannot be included in owner delivery runs and cannot place à la carte orders.
+</Warning>
+
+---
+
+### `GET /delivery/status`
+
+Returns the delivery status for each of the customer's meals scheduled for today. Skipped meals are excluded.
+
+**Auth:** Customer
+
+<CodeGroup>
+```bash Request
+GET /delivery/status
+Authorization: Bearer <token>
+```
+
+```json Response
+[
+  {
+    "meal_id": 42,
+    "menu": "Dal Makhani, Jeera Rice, Roti",
+    "meal_type": "lunch",
+    "status": "out_for_delivery",
+    "updated_at": "2025-07-18T12:15:43",
+    "guest": false,
+    "serving_ends_at": "2025-07-18T14:30:00+05:30"
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="meal_id" type="integer">ID of the meal being delivered.</ResponseField>
+<ResponseField name="menu" type="string">Meal menu description.</ResponseField>
+<ResponseField name="meal_type" type="string">`breakfast`, `lunch`, or `dinner`.</ResponseField>
+<ResponseField name="status" type="string">
+  Current delivery stage:
+  - `not_dispatched` — not yet started
+  - `preparing` — meal is being prepared
+  - `out_for_delivery` — meal is on its way
+  - `delivered` — meal has been delivered
+</ResponseField>
+<ResponseField name="updated_at" type="string (datetime) | null">UTC timestamp of the last status update by the owner.</ResponseField>
+<ResponseField name="guest" type="boolean">`true` if a guest was added to this meal by the customer.</ResponseField>
+<ResponseField name="serving_ends_at" type="string (datetime) | null">IST datetime when serving is expected to end (based on owner-configured meal timings), or `null` if not configured.</ResponseField>
+
+<Note>
+  Customer address and other customers' details are intentionally excluded from this response. Only the authenticated customer's own delivery rows are returned.
+</Note>
+
+---
+
+## Owner Delivery Endpoints
+
+### `GET /owner/deliveries`
+
+Returns the full delivery manifest for a given day. Each row represents one customer–meal combination, including their address, guest status, and current delivery stage.
+
+**Auth:** Owner
+
+<ParamField query="day" type="string (date)">The delivery date to query (`YYYY-MM-DD`). Defaults to today if omitted.</ParamField>
+
+<CodeGroup>
+```bash Request
+GET /owner/deliveries
+Authorization: Bearer <token>
+```
+
+```json Response
+[
+  {
+    "user_id": 14,
+    "meal_id": 42,
+    "name": "Priya Sharma",
+    "phone": "9876543210",
+    "menu": "Dal Makhani, Jeera Rice, Roti",
+    "meal_type": "lunch",
+    "address": "Room 12, Sunrise Hostel, FC Road, Pune - 411004",
+    "instructions": "Leave at the gate if no answer.",
+    "guest": false,
+    "serving_ends_at": "2025-07-18T14:30:00+05:30",
+    "status": "preparing",
+    "updated_at": "2025-07-18T11:45:00"
+  }
+]
+```
+</CodeGroup>
+
+<ResponseField name="user_id" type="integer">Customer's user ID.</ResponseField>
+<ResponseField name="meal_id" type="integer">Meal ID.</ResponseField>
+<ResponseField name="name" type="string">Customer full name.</ResponseField>
+<ResponseField name="phone" type="string">Customer phone number.</ResponseField>
+<ResponseField name="menu" type="string">Meal menu description.</ResponseField>
+<ResponseField name="meal_type" type="string">`breakfast`, `lunch`, or `dinner`.</ResponseField>
+<ResponseField name="address" type="string">Customer's saved delivery address (empty string if not set).</ResponseField>
+<ResponseField name="instructions" type="string">Customer's delivery instructions.</ResponseField>
+<ResponseField name="guest" type="boolean">`true` if this customer added a guest to this meal.</ResponseField>
+<ResponseField name="serving_ends_at" type="string (datetime) | null">IST end of the meal serving window, based on the owner's configured meal timings.</ResponseField>
+<ResponseField name="status" type="string">Current delivery status (see values above).</ResponseField>
+<ResponseField name="updated_at" type="string (datetime) | null">UTC timestamp of the last status update.</ResponseField>
+
+<Tip>
+  Rows with an empty `address` field mean the customer has not saved a delivery address. The owner cannot dispatch to those customers until an address is saved.
+</Tip>
+
+---
+
+### `PUT /owner/deliveries`
+
+Updates the delivery status for a single customer's meal. Status can only move **forward** through the pipeline — it cannot be reversed.
+
+**Auth:** Owner
+
+<ParamField body="user_id" type="integer" required>Customer user ID.</ParamField>
+<ParamField body="meal_id" type="integer" required>Meal ID to update.</ParamField>
+<ParamField body="status" type="string" required>
+  New delivery status. Must be one of:
+  - `preparing`
+  - `out_for_delivery`
+  - `delivered`
+</ParamField>
+
+<CodeGroup>
+```json Request body
+{
+  "user_id": 14,
+  "meal_id": 42,
+  "status": "out_for_delivery"
+}
+```
+
+```json Response
+{ "message": "Delivery status updated" }
+```
+</CodeGroup>
+
+<Warning>
+  The following conditions cause the update to be rejected with **HTTP 400**:
+  - The meal is not today's meal, or the customer has skipped it.
+  - The customer has no saved delivery address.
+  - The new `status` is earlier in the pipeline than the current status (no backward movement).
+</Warning>
+
+---
+
+## Delivery Rules Summary
+
+<CardGroup cols={2}>
+  <Card title="Address Required" icon="location-dot">
+    Customers must save a delivery address via `PUT /delivery/address` before the owner can dispatch any meals to them. À la carte orders also require a saved address.
+  </Card>
+  <Card title="No GPS Tracking" icon="map">
+    There is no real-time location tracking. The owner manually updates each delivery from preparing → out for delivery → delivered.
+  </Card>
+  <Card title="Skip Lock" icon="lock">
+    Once the owner moves a meal to `out_for_delivery` or `delivered`, the customer can no longer skip that meal or add guests to it.
+  </Card>
+  <Card title="Today Only" icon="calendar-day">
+    Delivery status applies to today's meals only. Past meals retain their last recorded status for history but cannot be updated.
+  </Card>
+</CardGroup>

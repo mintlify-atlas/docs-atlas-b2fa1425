@@ -1,0 +1,130 @@
+---
+title: "Ordering Meals: Subscriptions and À La Carte in Smart Mess"
+sidebarTitle: "Ordering"
+description: "Learn how to order meals on Smart Mess — choose a subscription plan or buy a single à la carte meal, manage guest additions, and track your meal history."
+---
+
+Smart Mess gives you two distinct ways to order food from your mess: a **subscription** that covers a block of days, or a **single à la carte meal** when you want to taste the food before committing. Both flows go through the same secure checkout — a bill is created immediately, and the booking activates only after your owner confirms full payment.
+
+<Note>
+  You must have a saved delivery address of at least 10 characters before the **Order food** section becomes accessible. Save yours under **Delivery** first.
+</Note>
+
+---
+
+## Subscription Ordering
+
+A subscription covers all scheduled meals of your chosen types across a defined date range. Your mess owner publishes plan offers — trial (1 day), weekly (7 days), monthly, or custom durations — and you pick one that suits you.
+
+<Steps>
+  <Step title="Browse published plans">
+    Open **Order food** → **Plans**. The list shows every active plan offer from your mess, including the name, category (regular / mini / protein / special), duration, price, covered meal types, and a brief description. The data comes from `GET /public/plans`.
+  </Step>
+  <Step title="Choose a plan and start date">
+    Select a plan and pick a start date — today or any future date. The end date is calculated automatically (start date + duration days − 1).
+  </Step>
+  <Step title="Confirm and check out">
+    Review the price and click **Checkout**. A bill for the full subscription amount is created instantly. You are redirected to Bills to complete payment.
+  </Step>
+  <Step title="Submit payment proof">
+    Pay your owner via the displayed QR / UPI or in cash, then submit your screenshot or cash confirmation in Bills. Your owner reviews the submission.
+  </Step>
+  <Step title="Owner confirms — subscription activates">
+    Once the owner confirms full payment, the subscription status changes from **Pending payment** to **Active** and all covered meals appear on your dashboard.
+  </Step>
+</Steps>
+
+<Warning>
+  Two situations block a new subscription request:
+  - **Overlapping dates** — you already have an active or pending-payment subscription that covers any of the requested dates.
+  - **Duplicate pending request** — you already have a pending plan request. Cancel the existing one before submitting a new request via `PATCH /subscriptions/requests/{id}` with `status: "cancelled"`.
+</Warning>
+
+---
+
+## À La Carte Single-Meal Ordering
+
+If you want to try one meal before signing up for a subscription — or if you simply want an extra meal on a day you are not subscribed — use the single-meal checkout.
+
+<Steps>
+  <Step title="Find a meal with single ordering enabled">
+    Open **Order food** → **Single meal**. Only meals where the owner has set a `single_price` appear here. Meals without a price cannot be individually ordered.
+  </Step>
+  <Step title="Select the meal and check out">
+    Choose the meal and confirm the price. The checkout is handled by `POST /customer/checkout` with a `meal_id` (no `offer_id`). A bill is generated immediately for the single meal price.
+  </Step>
+  <Step title="Pay and submit proof">
+    Follow the same payment flow as a subscription — scan the owner's QR or pay cash, then submit proof from the Bills screen.
+  </Step>
+  <Step title="Owner accepts and confirms">
+    A single-meal purchase goes through two owner actions: first the owner **accepts** the order (`POST /owner/personal-orders/{plan_id}/accept`), then confirms payment receipt. Only after full payment and acceptance does the meal appear as **Confirmed** on your dashboard.
+  </Step>
+</Steps>
+
+<Info>
+  A single-meal purchase does **not** count you as a subscribed customer for other meals on the same day, and it cannot be paused. Skip and guest-add actions are also unavailable for individual purchased meals.
+</Info>
+
+---
+
+## Guest Meals
+
+You can add one guest to any meal covered by your active subscription — useful when a family member or friend joins you for the day.
+
+```
+POST /meals/add-guest
+Body: { "meal_id": 42, "guest_count": 1, "expected_unit_price": 80.00 }
+```
+
+<Tabs>
+  <Tab title="How it works">
+    - The endpoint checks that your subscription covers the meal, the cutoff has not passed, and you have not already added a guest or skipped the meal.
+    - The owner sets the guest price via the meal's `single_price` field. The current price is shown on the dashboard before you confirm.
+    - The guest cost is added to your live bill immediately. If the owner changes the price between when you view it and when you submit, the API returns a `409` error asking you to refresh.
+    - Guest additions appear as `guest_added` status on your meal card and in Meal History.
+  </Tab>
+  <Tab title="Restrictions">
+    - You cannot add a guest after the meal cutoff time has passed.
+    - You cannot add a guest if the meal has been dispatched (`out_for_delivery` or `delivered`).
+    - You cannot add a guest to a meal you have already skipped — undo the skip first.
+    - Only one guest action is allowed per meal per customer (the owner sets guest count as a single add).
+    - Guest meals cannot be skipped; attempting to skip a `guest_added` meal returns `409`.
+  </Tab>
+</Tabs>
+
+---
+
+## Meal History
+
+Your complete activity log is available at `GET /meals/history`, which returns all meal order records sorted newest-first. The activity endpoint `GET /customer/activity` provides a richer view that combines:
+
+| Section | Contents |
+|---|---|
+| **Meals** | Every meal covered by a subscription or single purchase, with date, menu, delivery status, skip/guest status, extra costs, and whether you can leave a review |
+| **Purchases** | All subscription and single-meal checkouts with their issued bill and current status |
+| **Receipts** | Owner-confirmed payments with amounts and dates |
+| **Submissions** | Your pending and processed payment submissions |
+
+<Tip>
+  Use Meal History to verify that a skip was recorded, confirm a guest addition cost, or check whether a past à la carte order was accepted before attempting a review.
+</Tip>
+
+---
+
+## Checkout Rules Summary
+
+<Accordion title="What happens if the price changes between browsing and submitting?">
+  The checkout endpoint validates `expected_price` against the live offer price. If they differ, you receive a `409` error with the message _"Price has changed. Refresh and confirm the new amount."_ Refresh the Plans page and restart the checkout.
+</Accordion>
+
+<Accordion title="Can I cancel a checkout before paying?">
+  Yes — as long as no payment has been recorded and no payment submission is pending, you can cancel via `DELETE /customer/checkout/{plan_id}`. Once any payment submission exists or the owner has recorded a receipt, the cancellation is blocked and you must contact your owner directly.
+</Accordion>
+
+<Accordion title="What is a purchase key and why does checkout ask for one?">
+  A `purchase_key` is a UUID generated by the frontend before calling checkout. It makes the request idempotent — if you submit the same checkout twice (e.g. after a network timeout), the second call returns the existing record instead of creating a duplicate booking.
+</Accordion>
+
+<Accordion title="I ordered a single meal but it doesn't appear on my dashboard yet. Why?">
+  Single-meal orders require two owner steps: acceptance and payment confirmation. Until both are complete, the order remains in `pending_acceptance` or `pending_payment` status and does not appear as a confirmed meal in your daily view.
+</Accordion>

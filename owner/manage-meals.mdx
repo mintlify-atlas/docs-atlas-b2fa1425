@@ -1,0 +1,153 @@
+---
+title: "Publish and Manage Your Daily Meal Menus in Smart Mess"
+sidebarTitle: "Manage Meals"
+description: "Publish, edit, and delete breakfast, lunch, and dinner menus — including AI photo generation, cutoff times, and the reusable dish picker."
+---
+
+The **Manage Meals** panel is where you build every menu your customers see. Publishing a meal makes it visible to subscribed customers immediately, triggers automatic headcount updates, and allows customers to skip or add a guest before the cutoff you set. You can publish individual dates or let the weekly menu template generate recurring entries automatically.
+
+## Meal types
+
+Smart Mess supports three meal types per day, each treated as a separate, independent menu:
+
+| Meal type   | Typical use                                        |
+|-------------|-----------------------------------------------------|
+| `breakfast` | Morning service before lunch                        |
+| `lunch`     | Midday service                                      |
+| `dinner`    | Evening service                                     |
+
+Only one meal of each type can exist per date. Attempting to create a duplicate (same date + type) returns HTTP 400.
+
+## Publishing a meal
+
+Send a `POST` request to `/owner/meals` with at minimum `date`, `meal_type`, and `menu_description`. The `cutoff_time` and `single_price` fields are optional.
+
+<CodeGroup>
+```json Request body (minimal)
+{
+  "date": "2025-08-15",
+  "meal_type": "lunch",
+  "menu_description": "Daal, Roti, Raita, Salad"
+}
+```
+
+```json Request body (full)
+{
+  "date": "2025-08-15",
+  "meal_type": "lunch",
+  "menu_description": "Rajma, Roti, Raita, Salad",
+  "cutoff_time": "2025-08-15T10:30:00Z",
+  "single_price": 80.00,
+  "image_url": "https://example.com/generated-photo.jpg"
+}
+```
+
+```json Response (201)
+{
+  "id": 42,
+  "date": "2025-08-15",
+  "meal_type": "lunch",
+  "menu_description": "Rajma, Roti, Raita, Salad",
+  "cutoff_time": "2025-08-15T10:30:00Z",
+  "single_price": 80.00,
+  "image_url": "https://example.com/generated-photo.jpg"
+}
+```
+</CodeGroup>
+
+<Tip>
+Set `single_price` to enable individual meal ordering for customers who are not on a subscription. Leave it blank to restrict this meal to subscribers only.
+</Tip>
+
+## Using the dish picker
+
+The **Manage Meals** form includes a reusable dish picker stocked with frequently used items. Click **+** to add a dish to the current menu description and **−** to remove it.
+
+Built-in quick picks:
+
+- Daal
+- Roti
+- Raita
+- Salad
+- Rajma
+- Kadi
+
+You can also type custom dishes directly into the description field. Separate multiple dishes with commas (`Paneer, Jeera Rice, Papad`). Dishes you type are remembered and appear in the picker on your next visit — they are scoped to your owner account and survive page refreshes.
+
+## AI menu photo generation
+
+When you type or update a menu description, the frontend waits two seconds after you stop typing and then requests an AI-generated food photograph from the backend. The generated image URL is previewed in the form and saved with the meal when you click **Create Meal** or **Update Meal**.
+
+<Steps>
+  <Step title="Type the menu">
+    Enter your menu description in the description field using the dish picker or free text.
+  </Step>
+  <Step title="Wait for preview">
+    After a two-second pause, the form shows a preview of the generated photo. Identical menus reuse a cached image instantly.
+  </Step>
+  <Step title="Save the meal">
+    Click **Create Meal**. The meal is saved immediately — even if image generation is still running or fails.
+  </Step>
+</Steps>
+
+<Note>
+Image generation requires a Cloudflare Workers AI API token and account ID configured in `backend/.env`. Without these, the form shows a setup message and you can still save meals with the default category photo. Changing an existing menu description clears the previous generated image; existing meals keep their photo until a new one is saved.
+</Note>
+
+## Editing a meal
+
+Use `PUT /owner/meals/{meal_id}` to update any field of a published meal. Only the fields you include in the request body are updated.
+
+```http
+PUT /owner/meals/42
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+
+{
+  "menu_description": "Rajma, Rice, Raita, Papad",
+  "cutoff_time": "2025-08-15T09:00:00Z"
+}
+```
+
+<Warning>
+If any customer has already skipped, booked a guest, or made a delivery update for this meal, the API blocks changes to the **date** and **meal_type** fields. You can still update the menu description, cutoff time, and single price freely.
+</Warning>
+
+## Deleting a meal
+
+Use `DELETE /owner/meals/{meal_id}` to remove a meal that has had no customer activity.
+
+```http
+DELETE /owner/meals/42
+Authorization: Bearer <owner_token>
+```
+
+The API returns HTTP 400 if any customer has already recorded an action (skip, guest addition, delivery update, or feedback) for this meal. Meals generated from the weekly menu template return HTTP 409 — edit the weekly template entry directly instead of deleting the individual meal.
+
+## Understanding the cutoff time
+
+The `cutoff_time` is a UTC datetime. Once the current time passes the cutoff:
+
+- Customers **cannot** skip the meal or reduce their headcount.
+- Customers **cannot** add a guest.
+- The owner can still edit the menu description.
+
+<Info>
+Dispatching a meal (marking it `out_for_delivery` or `delivered`) also blocks customer skip actions, regardless of the cutoff time.
+</Info>
+
+## Weekly menu template
+
+Instead of publishing the same Monday lunch every week, you can define a weekly menu template. Entries are keyed by weekday (0 = Monday … 6 = Sunday) and meal type. The backend syncs future meals from these templates automatically when you open **Manage Meals**.
+
+- To create or update a weekly entry, use the **Weekly menu** section of the Manage Meals panel.
+- Meals generated from the template carry a `weekly_menu_entry_id`. Edit or remove the template entry to change all future auto-generated meals.
+- A meal you manually publish on a date that already has a template entry overrides the template for that specific date (`weekly_menu_override = true`).
+
+<Accordion title="Unique constraint details">
+The database enforces a unique index on `(owner_id, date, meal_type)`. This means:
+
+- One breakfast, one lunch, and one dinner per day — no duplicates.
+- If you try to publish a second lunch for the same day, the API returns HTTP 400 with the message `"Lunch already exists for 2025-08-15"`.
+- The weekly template respects the same constraint; it skips generation if a manual meal already exists.
+</Accordion>

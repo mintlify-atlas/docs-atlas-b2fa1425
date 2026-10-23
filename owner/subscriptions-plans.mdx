@@ -1,0 +1,189 @@
+---
+title: "Subscription Plans and Approval Workflow in Smart Mess"
+sidebarTitle: "Plans & Subscriptions"
+description: "Create plan offers, approve subscription requests, assign subscriptions directly, and understand skip deductions and overlap rules for Smart Mess owners."
+---
+
+The **Plans & Subscriptions** panel is where you define what customers can purchase and where you approve or reject requests before a subscription is activated. Smart Mess never activates a subscription automatically — payment confirmation is always required from you as the owner.
+
+## Plan types
+
+Every offer you publish has a `duration_days` value. The frontend groups offers into four descriptive categories by convention:
+
+| Plan type    | `duration_days` | Typical price range |
+|--------------|-----------------|----------------------|
+| Trial        | 1               | Single-day test      |
+| Weekly       | 7               | One week of meals    |
+| Monthly      | ~30             | Full calendar month  |
+| Custom       | Any (1–365)     | Owner-defined        |
+
+In addition, each offer has a `category` field (`regular`, `mini`, `protein`, or `special`) that describes the type of food included, not the duration.
+
+## Creating a plan offer
+
+Use `POST /owner/offers` to publish a new offer to the customer catalogue.
+
+<CodeGroup>
+```json Request body
+{
+  "name": "Monthly Regular",
+  "category": "regular",
+  "duration_days": 30,
+  "price": 3000.00,
+  "meal_price": 50.00,
+  "description": "All three meals daily for 30 days. Home-cooked North Indian food.",
+  "meal_types": ["breakfast", "lunch", "dinner"]
+}
+```
+
+```json Response (201)
+{
+  "id": 5,
+  "name": "Monthly Regular",
+  "category": "regular",
+  "duration_days": 30,
+  "price": 3000.00,
+  "meal_price": 50.00,
+  "description": "All three meals daily for 30 days. Home-cooked North Indian food.",
+  "meal_types": ["breakfast", "lunch", "dinner"]
+}
+```
+</CodeGroup>
+
+**List your active offers**
+
+```http
+GET /owner/offers
+Authorization: Bearer <owner_token>
+```
+
+The response includes an `assigned_count` field for each offer — the number of active or pending-payment subscriptions currently using that plan.
+
+<Tip>
+Set `meal_price` to the amount you want to deduct from a customer's bill when they skip one meal. This value defaults to ₹50 for legacy subscriptions. New subscriptions inherit the `meal_price` from the offer at approval time.
+</Tip>
+
+## Approving subscription requests
+
+When a customer requests a plan through **Order food → Plans & pause**, they choose an offer and a start date. The request lands in your queue as `pending`.
+
+**List pending requests**
+
+```http
+GET /owner/requests
+Authorization: Bearer <owner_token>
+```
+
+Each item shows the customer name, phone, offer details, and requested start date.
+
+**Approve or decline a request**
+
+```http
+PATCH /subscriptions/requests/{request_id}
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+
+{
+  "status": "approved"
+}
+```
+
+Pass `"rejected"` to decline. Approved requests:
+
+<Steps>
+  <Step title="Create the subscription">
+    The backend creates a `MealPlan` record in `pending_payment` status spanning `start_date` to `start_date + duration_days − 1`.
+  </Step>
+  <Step title="Generate a bill">
+    An `IssuedBill` is created immediately for the full plan price. The customer sees the bill in their **Bills** section.
+  </Step>
+  <Step title="Await payment">
+    The subscription stays in `pending_payment` until you confirm full payment in the **Payments** panel.
+  </Step>
+  <Step title="Activate">
+    Once payment is confirmed, the subscription status changes to `active` and the customer gains full access to their meals.
+  </Step>
+</Steps>
+
+<Warning>
+A plan whose start date has already passed cannot be approved. The API returns HTTP 400 and asks the customer to submit a new request. Reject the stale request and inform the customer to reselect.
+</Warning>
+
+## Approving join requests that include a plan
+
+When a customer self-registers through your join link **and** pre-selects a plan, the join request includes a `plan` object with the offer details and proposed dates.
+
+Approving that join request via `PATCH /owner/join-requests/{request_id}` simultaneously:
+
+1. Sets the customer's membership status to `approved`.
+2. Creates the `MealPlan` in `pending_payment` status.
+3. Issues a bill for the plan price.
+
+If the customer did not pre-select a plan, approval grants membership only. The customer then chooses a plan themselves through **Order food**.
+
+## Assigning subscriptions directly
+
+You can bypass the customer-request flow entirely by assigning a subscription from the **Plans & Subscriptions** panel. This is useful for walk-in customers or bulk setups.
+
+```http
+POST /owner/plans
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+
+{
+  "user_id": 12,
+  "start_date": "2025-09-01",
+  "end_date": "2025-09-30",
+  "price": 2800.00,
+  "meal_price": 50.00,
+  "meal_types": ["lunch", "dinner"]
+}
+```
+
+This creates a `pending_payment` subscription directly on the customer's account and issues a bill. The subscription activates only after you record full payment.
+
+<Info>
+You can omit `meal_types` to include all three meal types. Specifying a subset (e.g., lunch and dinner only) means the subscription does not cover breakfast — those meals will not count toward the customer's headcount on your dashboard.
+</Info>
+
+## Overlap and duplicate rules
+
+The API enforces two constraints that prevent billing confusion:
+
+<Accordion title="Overlapping subscriptions">
+A customer cannot hold two active or pending-payment subscriptions whose date ranges overlap. If you try to assign a subscription that overlaps an existing one, the API returns HTTP 400:
+
+```
+"Customer already has an active plan or a payment in progress for these dates.
+Choose dates after it ends."
+```
+
+The only exception: an existing `pending_payment` subscription that has no payment activity can be replaced by a new direct assignment. The old subscription is automatically cancelled.
+</Accordion>
+
+<Accordion title="Duplicate pending requests">
+A customer can have only one `pending` plan request at a time. If they try to submit a second request before you action the first, they receive:
+
+```
+"You already have a pending request. Cancel it before choosing another plan."
+```
+</Accordion>
+
+## Skip deduction (meal_price)
+
+Each subscription stores a `meal_price` — the amount deducted from the customer's bill when they skip one meal. For subscriptions you assign directly, you set this value in the form. For offer-based subscriptions, it comes from the offer's `meal_price` field.
+
+<Note>
+Legacy subscriptions created before the `meal_price` column was introduced use a default deduction of ₹50 per skipped meal. Update those subscriptions by re-assigning them with an explicit `meal_price`.
+</Note>
+
+## Archiving an offer
+
+To remove a plan from the public catalogue, call `DELETE /owner/offers/{offer_id}`. The offer is archived (`active = false`) rather than deleted.
+
+```http
+DELETE /owner/offers/5
+Authorization: Bearer <owner_token>
+```
+
+The API returns HTTP 409 if any customer currently holds an active or pending-payment subscription linked to that offer. Wait until the subscription ends or is cancelled before archiving.

@@ -1,0 +1,137 @@
+---
+title: "Tracking and Updating Meal Delivery Status in Smart Mess"
+sidebarTitle: "Delivery"
+description: "Use the Smart Mess delivery panel to mark meals preparing, out for delivery, and delivered — and understand how dispatch blocks customer skips."
+---
+
+The **Delivery** panel shows every meal you need to prepare and dispatch today. It lists all subscribed, non-skipped customers in one place so you can update their delivery status as you pack and send out orders. There is no GPS tracking or courier booking — you mark status changes manually as you work.
+
+<Note>
+Delivery management is for today's meals only. The panel does not show past or future dates. For historical delivery data, check individual customer subscription records.
+</Note>
+
+## What the delivery panel shows
+
+When you open Delivery, the backend queries `GET /owner/deliveries` for today's date and returns one row per customer per meal — but only for:
+
+- Meals scheduled for **today**.
+- Customers with an **active** subscription covering today.
+- Meals the customer has **not skipped**.
+
+Each row includes:
+
+| Field           | Description                                              |
+|-----------------|----------------------------------------------------------|
+| `name`          | Customer name                                            |
+| `phone`         | Customer phone number                                    |
+| `meal_type`     | `breakfast`, `lunch`, or `dinner`                        |
+| `menu`          | The published menu description                           |
+| `address`       | Customer's saved delivery address                        |
+| `instructions`  | Any special delivery instructions the customer entered   |
+| `guest`         | `true` if the customer added a guest for this meal       |
+| `serving_ends_at` | Scheduled end of serving time from your meal timings   |
+| `status`        | Current delivery status (see below)                      |
+| `updated_at`    | Timestamp of the last status update                      |
+
+<Warning>
+A customer without a saved delivery address cannot have their meal dispatched. The API returns HTTP 400: `"Customer must save a delivery address first"`. Ask the customer to open **Delivery** in their account and save their address before you attempt to dispatch.
+</Warning>
+
+## Delivery status progression
+
+Status moves in one direction only — you cannot move a status backwards.
+
+```
+not_dispatched → preparing → out_for_delivery → delivered
+```
+
+<CardGroup cols={4}>
+  <Card title="not_dispatched" icon="clock">
+    Default state. Meal is on the list but no action has been taken yet.
+  </Card>
+  <Card title="preparing" icon="fire-burner">
+    You have started cooking or packing this customer's order.
+  </Card>
+  <Card title="out_for_delivery" icon="motorcycle">
+    The meal has left your kitchen and is on its way.
+  </Card>
+  <Card title="delivered" icon="circle-check">
+    The customer has received their meal.
+  </Card>
+</CardGroup>
+
+## Updating delivery status
+
+Call `PUT /owner/deliveries` for each status change. You need the `meal_id` and `user_id` from the delivery list.
+
+<CodeGroup>
+```json Request body
+{
+  "user_id": 12,
+  "meal_id": 42,
+  "status": "out_for_delivery"
+}
+```
+
+```json Response (200)
+{
+  "message": "Delivery status updated"
+}
+```
+</CodeGroup>
+
+```http
+PUT /owner/deliveries
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+```
+
+You can update multiple customers' statuses in separate calls — each call is independent. There is no bulk-update endpoint; update one customer-meal pair at a time.
+
+<Tip>
+Use **preparing** when you start packing to give customers advance notice, then update to **out_for_delivery** when the delivery person leaves your kitchen. Customers see these changes when they refresh their dashboard.
+</Tip>
+
+## How dispatch affects customer skip ability
+
+Once a meal is marked `out_for_delivery` or `delivered`, the customer can no longer skip it — even if the cutoff time has not yet passed.
+
+This protection works in both directions:
+
+- **Owner dispatches → customer skip blocked.** Prevents customers from claiming a skip credit for a meal already on its way.
+- **Customer skips before dispatch → meal disappears from the delivery list.** Skipped meals do not appear in your delivery queue.
+
+<Info>
+The cutoff time on the meal and the dispatch status work independently as skip locks. Whichever triggers first wins. A meal with no cutoff time can still be locked by dispatch.
+</Info>
+
+## Querying a specific day
+
+By default `GET /owner/deliveries` returns today's data. You can pass an optional `day` query parameter to inspect another date (useful for checking yesterday's records).
+
+```http
+GET /owner/deliveries?day=2025-08-14
+Authorization: Bearer <owner_token>
+```
+
+## Customer delivery status view
+
+Customers see their own delivery status by calling `GET /delivery/status`. The response is filtered to the logged-in customer only and excludes addresses and other customers' data. The customer dashboard refreshes this status automatically when the window regains focus.
+
+```json
+[
+  {
+    "meal_id": 42,
+    "menu": "Rajma, Roti, Raita",
+    "meal_type": "lunch",
+    "status": "out_for_delivery",
+    "updated_at": "2025-08-15T10:45:00",
+    "guest": false,
+    "serving_ends_at": "2025-08-15T14:00:00+05:30"
+  }
+]
+```
+
+<Note>
+Smart Mess does not book couriers, share real-time GPS location, or integrate with any third-party logistics provider. Confirm delivery arrangements directly with your customers before starting delivery service. The app provides the status-tracking interface; the logistics are yours to manage.
+</Note>

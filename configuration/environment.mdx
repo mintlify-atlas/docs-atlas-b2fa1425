@@ -1,0 +1,304 @@
+---
+title: "Smart Mess Environment Variable Configuration Guide"
+sidebarTitle: "Environment"
+description: "Configure every Smart Mess environment variable — from database and auth secrets to OTP, SMTP, AI image generation, and translation services."
+---
+
+Smart Mess reads its entire runtime configuration from environment variables. In local development these are loaded from `backend/.env`; in production (for example, on Render) they are set directly in the platform's environment panel and the local file is never read. Start by copying the example file:
+
+```bash
+cp backend/env.example backend/.env
+```
+
+Then open `backend/.env` in your editor and fill in each value described below before starting the backend.
+
+<Warning>
+  Never prefix any server-side credential with `VITE_`. Variables that begin
+  with `VITE_` are bundled into the React frontend and become visible in
+  every visitor's browser. Credentials such as `SECRET_KEY`,
+  `GOOGLE_TRANSLATE_API_KEY`, `CLOUDFLARE_API_TOKEN`, `GEMINI_API_KEY`,
+  and all Twilio / SMTP secrets must live **only** in `backend/.env` or in
+  your deployment platform's server-side environment settings.
+</Warning>
+
+---
+
+## Database
+
+<Accordion title="DATABASE_URL — PostgreSQL connection string">
+  **Required in production.** Render refuses to start the backend if this
+  variable is missing or points to a SQLite file.
+
+  ```dotenv
+  DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.xxxxx.supabase.co:5432/postgres
+  ```
+
+  | Scenario | Value |
+  |---|---|
+  | Supabase (production) | `postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres` |
+  | Local development fallback | omit the variable — SQLite (`mess.db`) is used automatically |
+  | In-memory test | `sqlite://` |
+
+  <Note>
+    Use a **direct** PostgreSQL connection URL when running `python -m app.migrate upgrade`. Some connection poolers (PgBouncer in transaction mode, Supabase's pooler port 6543) cannot handle DDL advisory locks. The regular application `DATABASE_URL` can target the pooler after migrations complete.
+  </Note>
+</Accordion>
+
+---
+
+## Authentication
+
+<Accordion title="SECRET_KEY — JWT signing secret">
+  A long, random string used to sign and verify every JWT issued by the
+  backend. **Must remain identical across all workers and across restarts.**
+
+  ```dotenv
+  SECRET_KEY=change-this-to-a-long-random-string
+  ```
+
+  Generate a secure value with:
+
+  ```bash
+  python -c "import secrets; print(secrets.token_urlsafe(48))"
+  ```
+
+  **Effects of rotating or losing this value:**
+  - All existing login sessions are immediately invalidated.
+  - Pending console OTP challenges (if any) are invalidated.
+  - Customers must log in again.
+
+  Production and Render deployments **refuse to start** if `SECRET_KEY` is
+  missing or blank. Development mode auto-generates a temporary key with a
+  warning, but sessions won't survive a restart.
+</Accordion>
+
+<Accordion title="ALGORITHM — JWT signing algorithm">
+  The HMAC algorithm used to sign tokens. Changing this invalidates all
+  outstanding tokens signed with the previous algorithm.
+
+  ```dotenv
+  ALGORITHM=HS256
+  ```
+
+  | Value | Notes |
+  |---|---|
+  | `HS256` | Default; widely supported |
+  | `HS384` | Stronger digest; same key requirements |
+  | `HS512` | Strongest digest; same key requirements |
+
+  Any other value causes the backend to refuse to start.
+</Accordion>
+
+<Accordion title="ACCESS_TOKEN_EXPIRE_MINUTES — token lifetime">
+  How long a JWT remains valid after issue. Must be a positive integer.
+  Defaults to `1440` (24 hours).
+
+  ```dotenv
+  ACCESS_TOKEN_EXPIRE_MINUTES=1440
+  ```
+
+  Shorter values require customers to log in more frequently. Longer values
+  increase the window during which a compromised token could be misused.
+</Accordion>
+
+<Accordion title="APP_ENV — runtime environment flag">
+  Controls startup validation behaviour and OTP mode restrictions.
+
+  ```dotenv
+  APP_ENV=development   # local dev
+  APP_ENV=production    # deployed service
+  ```
+
+  | Value | Behaviour |
+  |---|---|
+  | `development` | Missing `SECRET_KEY` generates a temporary one with a warning; `console` OTP mode is allowed |
+  | `production` | Missing or blank `SECRET_KEY` aborts startup; `console` OTP mode is blocked; `.env` file is never read |
+
+  Render sets its own `RENDER=true` flag independently; the backend treats any
+  Render environment as production regardless of this variable's value.
+</Accordion>
+
+---
+
+## OTP Signup
+
+<Accordion title="SIGNUP_OTP_MODE — phone verification strategy">
+  Controls whether new customer self-signup requires phone verification.
+
+  ```dotenv
+  SIGNUP_OTP_MODE=off        # no verification (demo / owner-registered accounts)
+  SIGNUP_OTP_MODE=console    # prints the code in the backend terminal (local dev only)
+  SIGNUP_OTP_MODE=twilio     # sends a real SMS via Twilio Verify
+  ```
+
+  | Mode | Use case |
+  |---|---|
+  | `off` | Demo deployments; owner manually registers customers |
+  | `console` | Local development — OTP appears in the Uvicorn terminal, no SMS sent |
+  | `twilio` | Production self-signup with real SMS delivery |
+
+  `console` mode is blocked when `APP_ENV=production`.
+</Accordion>
+
+<Accordion title="TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_VERIFY_SERVICE_SID">
+  Required only when `SIGNUP_OTP_MODE=twilio`. Obtain all three values from
+  your [Twilio Console](https://console.twilio.com/).
+
+  ```dotenv
+  TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  TWILIO_AUTH_TOKEN=your_auth_token
+  TWILIO_VERIFY_SERVICE_SID=VAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  ```
+
+  The backend uses Twilio Verify (not SMS directly), so you need a Verify
+  Service SID, not a plain messaging SID.
+</Accordion>
+
+---
+
+## Email (SMTP)
+
+<Accordion title="SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM">
+  Used to email newly registered customers their login credentials. Gmail with
+  an app password on port 587 (STARTTLS) is the documented default.
+
+  ```dotenv
+  SMTP_HOST=smtp.gmail.com
+  SMTP_PORT=587
+  SMTP_USER=your-gmail@gmail.com
+  SMTP_PASSWORD=your-app-password
+  SMTP_FROM=your-gmail@gmail.com
+  ```
+
+  A failed email does **not** roll back the account creation — share
+  credentials manually if the email doesn't arrive.
+</Accordion>
+
+<Accordion title="CUSTOMER_LOGIN_URL — link included in registration emails">
+  The URL customers click to reach the login page. Must be reachable from
+  the customer's device.
+
+  ```dotenv
+  CUSTOMER_LOGIN_URL=https://mess-manager-tau.vercel.app/login
+  ```
+
+  `http://localhost:5173` works only when the customer is on the same machine.
+  Use your deployed Vercel URL in production.
+</Accordion>
+
+---
+
+## AI Menu Photos (Cloudflare Workers AI)
+
+<Accordion title="CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID / MENU_IMAGE_MODEL">
+  When an owner types a menu description and pauses, the backend generates an
+  illustrative photo using Cloudflare Workers AI FLUX.1 Schnell. Generated
+  images are cached by content hash, so identical menus reuse the same photo.
+
+  ```dotenv
+  CLOUDFLARE_API_TOKEN=your_workers_ai_api_token
+  CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
+  MENU_IMAGE_MODEL=@cf/black-forest-labs/flux-1-schnell
+  ```
+
+  Obtain `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` from
+  **Cloudflare Dashboard → Workers AI → Use REST API**. Use the
+  *Workers AI Read and Edit* permission template — not the Global API Key.
+
+  If these variables are absent, the owner dashboard displays a setup
+  message and meals can still be saved without a generated photo.
+</Accordion>
+
+---
+
+## AI Kitchen Advisor (Gemini)
+
+<Accordion title="GEMINI_API_KEY / KITCHEN_ADVISOR_MODEL">
+  Powers the in-app kitchen advisor feature. The key is never forwarded to
+  the browser.
+
+  ```dotenv
+  GEMINI_API_KEY=AIza...
+  KITCHEN_ADVISOR_MODEL=gemini-2.5-flash-lite
+  ```
+
+  See [Google AI Studio](https://aistudio.google.com/) for key generation.
+  Live generation uses your Gemini API billing quota. Tests mock the provider;
+  no live calls are made during automated runs.
+</Accordion>
+
+---
+
+## Translation
+
+<Accordion title="GOOGLE_TRANSLATE_API_KEY — dynamic Hindi translation">
+  Enables server-side translation of saved menu and mess descriptions into
+  Hindi via Google Cloud Translation Basic (v2). Restrict the key to the
+  Translation API in your Google Cloud Console.
+
+  ```dotenv
+  GOOGLE_TRANSLATE_API_KEY=AIza...
+  ```
+
+  Without this key the app shows English content and no translation calls
+  are made.
+</Accordion>
+
+<Accordion title="TRANSLATION_DAILY_CHARACTER_LIMIT — per-worker daily budget">
+  Maximum source characters the backend will translate per UTC calendar day
+  per worker process. Defaults to `50000`.
+
+  ```dotenv
+  TRANSLATION_DAILY_CHARACTER_LIMIT=50000
+  ```
+
+  Set matching quotas on your Google Cloud project to control costs. The
+  in-memory counter resets at UTC midnight and is not shared between workers;
+  configure Redis caching (below) for multi-worker deployments.
+</Accordion>
+
+<Accordion title="TRANSLATION_REDIS_REST_URL / TRANSLATION_REDIS_REST_TOKEN — shared cache">
+  Optional. When set, translated strings are stored in a Redis REST cache
+  (such as Upstash) so that cache entries survive restarts and are shared
+  across all workers. Cache storage does not touch the business database and
+  requires no schema migration.
+
+  ```dotenv
+  TRANSLATION_REDIS_REST_URL=https://your-upstash-endpoint.upstash.io
+  TRANSLATION_REDIS_REST_TOKEN=your_upstash_token
+  ```
+
+  Memory cache entries last 30 days with bounded size when Redis is not
+  configured.
+</Accordion>
+
+---
+
+## Quick-reference table
+
+| Variable | Required | Default |
+|---|---|---|
+| `DATABASE_URL` | Production | SQLite fallback in dev |
+| `SECRET_KEY` | Production / Render | Auto-generated in dev (unstable) |
+| `ALGORITHM` | No | `HS256` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | No | `1440` |
+| `APP_ENV` | No | `production` on Render, `development` otherwise |
+| `SIGNUP_OTP_MODE` | No | `twilio` |
+| `TWILIO_ACCOUNT_SID` | Only with `twilio` mode | — |
+| `TWILIO_AUTH_TOKEN` | Only with `twilio` mode | — |
+| `TWILIO_VERIFY_SERVICE_SID` | Only with `twilio` mode | — |
+| `SMTP_HOST` | No | — |
+| `SMTP_PORT` | No | — |
+| `SMTP_USER` | No | — |
+| `SMTP_PASSWORD` | No | — |
+| `SMTP_FROM` | No | — |
+| `CUSTOMER_LOGIN_URL` | No | — |
+| `CLOUDFLARE_API_TOKEN` | No | — |
+| `CLOUDFLARE_ACCOUNT_ID` | No | — |
+| `MENU_IMAGE_MODEL` | No | `@cf/black-forest-labs/flux-1-schnell` |
+| `GEMINI_API_KEY` | No | — |
+| `KITCHEN_ADVISOR_MODEL` | No | `gemini-2.5-flash-lite` |
+| `GOOGLE_TRANSLATE_API_KEY` | No | — |
+| `TRANSLATION_DAILY_CHARACTER_LIMIT` | No | `50000` |
+| `TRANSLATION_REDIS_REST_URL` | No | — |
+| `TRANSLATION_REDIS_REST_TOKEN` | No | — |

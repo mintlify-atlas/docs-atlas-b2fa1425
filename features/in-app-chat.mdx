@@ -1,0 +1,147 @@
+---
+title: "In-App Chat: Real-Time Owner and Customer Messaging"
+sidebarTitle: "In-App Chat"
+description: "Owner and customer chat widget that floats on every page, with persistent message history, 5-second badge refresh, and idempotent duplicate-safe sends."
+---
+
+The in-app chat widget lets owners and customers exchange text messages without navigating away from any page. A floating **Chat** button appears at the bottom-right corner of the screen. Conversations persist in the database, unread badges update every five seconds, and failed sends preserve the draft so nothing is accidentally lost.
+
+<Info>
+  Approved membership is required to send or receive messages. A customer who has not yet been approved by the owner cannot open a conversation.
+</Info>
+
+## How it works
+
+<Tabs>
+  <Tab title="For customers">
+    <Steps>
+      <Step title="Open the mess">
+        Navigate to your mess dashboard or any mess page after logging in.
+      </Step>
+      <Step title="Click the Chat button">
+        The floating **Chat** button appears at the bottom-right of the screen. Click it to open the compact chat popup.
+      </Step>
+      <Step title="Send a message">
+        Type your message (up to 2,000 characters) and press **Send**. The owner sees it the next time their badge refreshes.
+      </Step>
+      <Step title="Close the popup">
+        Close with **×**, click the Chat launcher again, or press **Escape**. The app does not navigate away.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="For owners">
+    <Steps>
+      <Step title="Click the Chat button">
+        Click **Chat** in the floating launcher at the bottom-right.
+      </Step>
+      <Step title="Choose a member">
+        A dropdown lists all your approved members. Select the customer you want to reply to. Members with unread messages appear at the top.
+      </Step>
+      <Step title="Reply">
+        Type your reply and press **Send**. The customer sees it on their next badge refresh.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Message delivery and history
+
+<CardGroup cols={2}>
+  <Card title="Refresh interval" icon="arrows-rotate">
+    Conversations and unread launcher badges refresh every **5 seconds** while the app is open. There are no browser push notifications.
+  </Card>
+  <Card title="Message history" icon="clock-rotate-left">
+    History loads **50 messages per page**. Click **Load earlier messages** to page back through older entries.
+  </Card>
+  <Card title="Failed sends" icon="floppy-disk">
+    If a send fails, the draft is preserved in the input. Retries reuse the same **idempotency key** so duplicate messages are never created.
+  </Card>
+  <Card title="Message persistence" icon="database">
+    All messages are stored in the application database. Conversations survive backend restarts and are scoped per mess — customers cannot read other customers' messages, and owners cannot read messages from other messes.
+  </Card>
+</CardGroup>
+
+## Rate limits and message constraints
+
+| Limit | Value |
+|---|---|
+| Maximum message length | 2,000 characters |
+| Rate limit | 30 messages per minute per sender per mess |
+| Rate limit type | Database-backed rolling window — not a strict concurrent limiter |
+
+<Note>
+  The 30 messages/minute limit applies per sender within a mess. Hitting it returns HTTP 429 with a "Please wait a minute" message.
+</Note>
+
+## API reference
+
+<CodeGroup>
+```http GET conversations
+GET /chat/conversations
+```
+
+```http GET messages
+GET /chat/messages?customer_id=123&after_id=0
+```
+
+```http POST send message
+POST /chat/messages
+Content-Type: application/json
+
+{
+  "customer_id": 123,
+  "body": "Your tiffin is ready for pickup at 1 PM.",
+  "client_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+```http PATCH mark read
+PATCH /chat/read
+Content-Type: application/json
+
+{
+  "customer_id": 123,
+  "last_message_id": 456
+}
+```
+</CodeGroup>
+
+**Endpoint notes:**
+- `GET /conversations` — Returns all conversations for the authenticated user, sorted by unread first then most recent.
+- `GET /messages` — Returns up to 50 messages. Use `before_id` to page backward (Load earlier messages) or `after_id` to poll for new ones.
+- `POST /messages` — Requires a `client_key` (UUID). Retrying with the same key and body is safe; retrying with a different body returns HTTP 409.
+- `PATCH /read` — Marks all unread incoming messages up to `last_message_id` as read.
+
+## Deployment: required migration
+
+Before starting the backend for the first time after adding in-app chat, apply migration **0007_in_app_chat**:
+
+```bash
+python -m app.migrate upgrade
+```
+
+Run this command from the `backend` directory with the production `DATABASE_URL` configured. API startup checks the schema but **never applies migrations automatically**.
+
+<Warning>
+  Do not skip this migration. The chat API will fail to start if the required tables do not exist. No account or payment data is affected by this migration.
+</Warning>
+
+## Limitations
+
+<Accordion title="What in-app chat does not support">
+  - **No file or image attachments** — text only.
+  - **No browser push notifications** — the badge refreshes every 5 seconds while the tab is open.
+  - **No SMS or email fallback** — messages remain in-app only.
+  - **No HTML rendering** — all message content is displayed as plain text. This is intentional to prevent injection attacks.
+  - **Not end-to-end encrypted** — messages are stored in the application database and accessible to database administrators.
+</Accordion>
+
+## Running tests
+
+Five isolated chat tests cover two-way messages, unread/read cursors, duplicate retries, owner and customer isolation, pending-member denial, history pagination, and additive migration preservation:
+
+```bash
+python backend/run_tests.py --pattern test_app.py
+```
+
+The frontend retry test verifies that failed drafts are preserved and duplicate retry keys stay stable across attempts.

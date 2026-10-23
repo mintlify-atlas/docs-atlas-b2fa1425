@@ -1,0 +1,109 @@
+---
+title: "Customer Dashboard: Navigate Your Smart Mess Workspace"
+sidebarTitle: "Dashboard"
+description: "Explore the Smart Mess customer dashboard — view today's meals, subscription status, live bill summary, and navigate to ordering, payments, and reviews."
+---
+
+After your mess owner approves your membership and you save a delivery address, the Smart Mess dashboard becomes your daily command centre. It surfaces everything you need at a glance — the food being served today, your upcoming schedule, the current state of your subscription, and a real-time running bill — without requiring you to dig through menus.
+
+## Joining Your Mess
+
+Before you can reach the dashboard, you need to create an account and receive owner approval.
+
+<Steps>
+  <Step title="Open the join link or scan the QR">
+    Your mess owner shares a unique invite URL in the format `/join/{token}`, or you can scan the downloadable QR code. Opening either takes you to the registration page for that specific mess.
+  </Step>
+  <Step title="Enter your details">
+    Fill in your full name, a 10-digit phone number (this is your login ID), and choose a password of at least 8 characters. New accounts require a phone verification step before submission.
+  </Step>
+  <Step title="Submit your request">
+    Click **Join this mess**. You will see a confirmation: _"Join request sent. Log in with your phone and chosen password to check approval."_ You can log in immediately, but the workspace is locked until the owner acts.
+  </Step>
+  <Step title="Wait for owner approval">
+    While pending you will see a **Waiting for owner approval** screen. The owner reviews join requests from their dashboard and clicks **Approve & assign plan**. You receive no external notification — check back by opening the app.
+  </Step>
+  <Step title="Save your delivery address">
+    Once approved, the app prompts you to save a complete delivery address (minimum 10 characters) before any other feature is accessible. Go to **Delivery**, enter your address and any drop-off instructions, and save. This unlocks the full workspace.
+  </Step>
+</Steps>
+
+<Note>
+  A phone number identifies exactly one account across Smart Mess. If you already have an account and try to re-register with the same number, the app recognises you and updates your pending request instead of creating a duplicate.
+</Note>
+
+---
+
+## What the Dashboard Shows
+
+Once your account is active and your address is saved, the dashboard refreshes automatically when the browser tab regains focus and after any meal action (skip, undo, guest add).
+
+<CardGroup cols={2}>
+  <Card title="Today's Meals" icon="utensils">
+    Lists every published meal for today with its menu description, meal type (breakfast / lunch / dinner), AI-generated food photo, and your current status — Confirmed, Skipped, or Guest Added. A **can\_manage** flag shows when you can still skip or add a guest before the cutoff.
+  </Card>
+  <Card title="Upcoming Meals" icon="calendar-days">
+    Shows all published meals from today onward, sorted by date and cutoff time. Useful for planning skips or guest additions in advance.
+  </Card>
+  <Card title="Current Subscription" icon="id-card">
+    Displays your active plan name, covered meal types, start and end dates, skip count, and any subscription extension days earned from skips.
+  </Card>
+  <Card title="Live Bill Summary" icon="receipt">
+    A running total calculated as **Base Price − Skip Deductions + Guest & Extra Costs**. Updates immediately after every meal action without a page reload.
+  </Card>
+</CardGroup>
+
+---
+
+## In-App Notifications
+
+Smart Mess does not send email or push notifications. All alerts are delivered inside the app.
+
+<Info>
+  The bill notification banner polls the server every **15 seconds** while you are logged in. When your owner generates a new bill snapshot, the banner appears automatically — you do not need to refresh the page.
+</Info>
+
+---
+
+## Language Settings
+
+You can switch the interface between **English** and **Hindi** at any time using the language selector in the navigation bar.
+
+<Tip>
+  Your language preference is stored in the browser under the key `mess-language` and persists across sessions on the same device. Dynamic content such as menu descriptions and offer text is translated through the backend; owner-provided Hindi descriptions take precedence over automatic translation.
+</Tip>
+
+---
+
+## Dashboard Navigation Links
+
+The dashboard header and sidebar provide quick links to every customer-facing section:
+
+| Link | What it does |
+|---|---|
+| **Order food** | Choose a subscription plan or buy a single à la carte meal |
+| **Plans & pause** | View your active subscription and pause a date range |
+| **Bills** | View generated bill snapshots and submit payment proof |
+| **Reviews** | Rate past meals and leave suggestions for the owner |
+| **Chat** | Send a direct message to your mess owner |
+| **Delivery** | Update your delivery address and view today's dispatch status |
+
+---
+
+## Frequently Asked Questions
+
+<Accordion title="I approved my account but I can't see any meals. What should I do?">
+  You must save a delivery address before the workspace is accessible. Go to **Delivery**, enter a complete address (at least 10 characters), and save. The dashboard will load your meals immediately after.
+</Accordion>
+
+<Accordion title="Can I belong to more than one mess?">
+  A single phone number can be associated with multiple messes. After logging in you will see a mess-selection screen if you have memberships at more than one location. Each mess has its own separate dashboard, meals, and billing.
+</Accordion>
+
+<Accordion title="The dashboard shows 'Waiting for owner approval' even after I registered. How long does this take?">
+  Approval is a manual step performed by the mess owner. There is no automated time limit. If you have been waiting a long time, contact your owner directly — Smart Mess does not send approval reminders.
+</Accordion>
+
+<Accordion title="Why does my bill amount change without me doing anything?">
+  The bill recalculates live whenever the owner updates guest pricing, records a payment, or generates a new bill snapshot. The 15-second notification poll and focus-based refresh keep the figure current.
+</Accordion>

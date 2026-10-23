@@ -1,0 +1,185 @@
+---
+title: "Smart Mess REST API Reference — Overview & Route Guide"
+sidebarTitle: "Overview"
+description: "Base URLs, authentication model, multi-tenancy scoping, error conventions, rate limits, and a map of every route group in the Smart Mess API."
+---
+
+The Smart Mess API is a FastAPI-powered JSON REST service that backs the full-stack mess and tiffin management platform. Every request and response is JSON; the server title reported by FastAPI is **"Smart Mess & Tiffin Manager API"**. Whether you are building an integration, exploring the interactive docs, or troubleshooting a request, this page gives you the foundational reference you need before diving into individual endpoints.
+
+## Base URL
+
+| Environment | Base URL |
+|---|---|
+| Local development | `http://127.0.0.1:8001` |
+| Production (Render) | Your Render service URL, e.g. `https://smart-mess.onrender.com` |
+
+<Note>
+  The server port is not hardcoded — it is set at startup via `uvicorn` arguments or the Render service config. Default local port is **8001** by convention.
+</Note>
+
+## Interactive API Docs
+
+FastAPI auto-generates two interactive documentation UIs from the OpenAPI schema — no extra tooling required.
+
+| UI | Path |
+|---|---|
+| Swagger UI | `/docs` |
+| ReDoc | `/redoc` |
+
+The Swagger UI's **Authorize** button calls `POST /auth/token` using the OAuth2 password flow. Enter your phone number as the username and your password to receive a bearer token scoped to your session.
+
+## Authentication
+
+All protected endpoints require a **Bearer JWT** token in the `Authorization` header.
+
+```http
+Authorization: Bearer <access_token>
+```
+
+Tokens are obtained by calling `POST /auth/login` (JSON) or `POST /auth/token` (OAuth2 form). The default token lifetime is **1 440 minutes (24 hours)**; the `ACCESS_TOKEN_EXPIRE_MINUTES` environment variable controls this. Tokens are signed with HMAC-SHA using the `SECRET_KEY` configured on the server.
+
+<Tip>
+  Use `POST /auth/login` from application code and `POST /auth/token` from Swagger UI. Both return the same JWT.
+</Tip>
+
+## Roles
+
+Smart Mess uses a two-role model embedded in the JWT payload.
+
+| Role | Description |
+|---|---|
+| `owner` | Creates and manages the mess, meals, subscriptions, payments, and customers. |
+| `customer` | A subscriber of a specific mess; performs personal meal and billing actions. |
+
+Most endpoints enforce role-based access — sending a request with the wrong role returns **HTTP 403**.
+
+## Multi-Tenancy
+
+All data is scoped to the **authenticated user's mess**. Owners only see their own customers, meals, payments, and subscriptions — never another mess's data. The tenancy layer resolves automatically from the JWT; no additional query parameter is needed. Customer accounts may optionally pass an `X-Mess-Token` header when they belong to multiple mess instances.
+
+## Response Format
+
+All successful responses return JSON objects or arrays. Error responses follow standard HTTP status semantics and include a `detail` field.
+
+```json
+{
+  "detail": "Invalid phone number or password"
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `200` | Success |
+| `201` | Resource created |
+| `401` | Missing or invalid token, wrong credentials |
+| `403` | Authenticated but insufficient role or pending approval |
+| `404` | Resource not found |
+| `409` | Conflict — e.g. duplicate phone number |
+| `422` | Validation error (Pydantic) |
+| `429` | Rate limit exceeded |
+
+## Rate Limiting
+
+Auth endpoints are protected by a **database-backed, multi-worker rate limiter** that tracks two independent buckets per login attempt.
+
+<Warning>
+  Exceeding either limit returns **HTTP 429** with a `Retry-After` header indicating how many seconds to wait before retrying.
+</Warning>
+
+| Bucket | Limit | Window |
+|---|---|---|
+| Per account (phone number) | 10 failed attempts | 15 minutes |
+| Per IP address | 100 failed attempts | 15 minutes |
+
+A successful login clears the account bucket. The IP bucket is not reset on success.
+
+## Route Groups
+
+The API is organized into the following route prefixes. Each prefix maps to a tag visible in the Swagger UI.
+
+<Accordion title="/auth — Signup, Login & OTP">
+  Handles new user registration (owner and customer), JSON login, OAuth2 token login, and the optional OTP verification flow used when `SIGNUP_OTP_MODE` is not `off`.
+</Accordion>
+
+<Accordion title="/meals — Customer Meal Actions">
+  Lets customers view upcoming meals, skip a meal, add guest portions, and view personal meal history.
+</Accordion>
+
+<Accordion title="/owner/meals — Owner Meal Management">
+  Owner-only CRUD for daily and recurring meals, including menu descriptions, pricing, cutoff times, and meal images.
+</Accordion>
+
+<Accordion title="/billing — Bill Summaries">
+  Returns billing summaries and outstanding balances scoped to the authenticated customer or owner.
+</Accordion>
+
+<Accordion title="/payments — Payment Methods, Receipts & Confirmation">
+  Customers upload payment receipts; owners confirm or reject payments. Covers payment method configuration and payment history.
+</Accordion>
+
+<Accordion title="/subscriptions — Plans, Requests & Pause">
+  Manages subscription plan creation, customer subscription requests, plan pausing, and renewal.
+</Accordion>
+
+<Accordion title="/owner/offers — Publishable Plan Offers">
+  Owners publish plan offers visible to prospective customers during the join flow.
+</Accordion>
+
+<Accordion title="/delivery — Address Management & Status Tracking">
+  Customers manage delivery addresses; owners track and update delivery statuses.
+</Accordion>
+
+<Accordion title="/join — QR Join Flow">
+  Handles the QR-code-based customer onboarding flow, including invite token validation and join requests.
+</Accordion>
+
+<Accordion title="/public — Unauthenticated Menu, Plans & Reviews">
+  Publicly accessible endpoints returning the mess menu, available plans, and customer reviews — no token required.
+</Accordion>
+
+<Accordion title="/dashboard — Headcount">
+  Returns headcount summaries (confirmed, skipped, guests) for owner dashboard views.
+</Accordion>
+
+<Accordion title="/reviews — Submit & List Reviews">
+  Customers submit reviews after meals; owners and the public can list approved reviews.
+</Accordion>
+
+<Accordion title="/customer/a-la-carte and /owner/a-la-carte — Single-Meal Ordering">
+  Supports à la carte ordering for customers without a subscription and owner-side management of single-meal orders.
+</Accordion>
+
+<Accordion title="/conversations and /messages — In-App Chat">
+  Provides in-app messaging between owners and customers, including conversation threads and individual messages.
+</Accordion>
+
+<Accordion title="/owner/kitchen-advisor — AI Review Analysis">
+  An AI-powered endpoint that analyses customer reviews to surface actionable kitchen and menu insights for owners.
+</Accordion>
+
+<Accordion title="/translations — Dynamic Content Translation">
+  Translates dynamic mess content (menus, descriptions) using the Google Translate API with a per-worker daily character budget.
+</Accordion>
+
+## Endpoint Reference
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Signup, login, OTP verification, and token endpoints.
+  </Card>
+  <Card title="Meals" icon="utensils" href="/api/meals">
+    Customer meal actions, owner meal CRUD, public menu, and à la carte ordering.
+  </Card>
+  <Card title="Subscriptions" icon="rotate" href="/api/subscriptions">
+    Plan offers, subscription requests, approval, and pause management.
+  </Card>
+  <Card title="Billing & Payments" icon="credit-card" href="/api/billing-payments">
+    Bill summaries, payment methods, receipt uploads, and owner confirmation.
+  </Card>
+  <Card title="Delivery" icon="truck" href="/api/delivery">
+    Address management and delivery status tracking.
+  </Card>
+  <Card title="Reviews" icon="star" href="/api/reviews">
+    Submit and list customer reviews, and AI Kitchen Advisor analysis.
+  </Card>
+</CardGroup>

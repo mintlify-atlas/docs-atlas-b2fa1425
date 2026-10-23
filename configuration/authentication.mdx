@@ -1,0 +1,214 @@
+---
+title: "Smart Mess Authentication, Roles, and Security Reference"
+sidebarTitle: "Authentication"
+description: "Understand Smart Mess JWT auth flow, role-based access, rate limiting, OTP signup modes, and password rules for secure API integration."
+---
+
+Smart Mess uses JSON Web Tokens (JWT) for stateless authentication. Every protected API route validates a Bearer token on each request; no server-side session store is required. This page covers how to obtain and use tokens, what roles they carry, how rate limiting and OTP signup work, and what password rules apply.
+
+---
+
+## Obtaining a token
+
+There are two login endpoints. Both accept the same credentials and return the same token shape.
+
+<Tabs>
+  <Tab title="JSON login (recommended)">
+    ```bash
+    curl -X POST https://your-backend.onrender.com/auth/login \
+      -H 'Content-Type: application/json' \
+      -d '{"phone": "9000000001", "password": "Demo1234"}'
+    ```
+
+    Returns:
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "token_type": "bearer"
+    }
+    ```
+  </Tab>
+  <Tab title="OAuth2 form login">
+    `POST /auth/token` accepts `application/x-www-form-urlencoded` with
+    `username` (the phone number) and `password` fields. This endpoint exists
+    for OAuth2 client compatibility (e.g. the `/docs` Swagger UI).
+
+    ```bash
+    curl -X POST https://your-backend.onrender.com/auth/token \
+      -d 'username=9000000001&password=Demo1234'
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Using the token
+
+Include the access token as a `Bearer` value in the `Authorization` header on every authenticated request:
+
+```bash
+curl https://your-backend.onrender.com/meals/today \
+  -H 'Authorization: Bearer <access_token>'
+```
+
+Tokens that are expired, signed with a different `SECRET_KEY`, or otherwise invalid receive a `401 Unauthorized` response with the message `"Invalid or expired token"`. There is no token refresh endpoint — clients must re-authenticate via `/auth/login`.
+
+---
+
+## Token details
+
+| Property | Value |
+|---|---|
+| Format | Signed JWT (compact serialization) |
+| Algorithm | Set by `ALGORITHM` env var — `HS256` (default), `HS384`, or `HS512` |
+| Signing secret | `SECRET_KEY` environment variable |
+| Lifetime | `ACCESS_TOKEN_EXPIRE_MINUTES` minutes from issue (default `1440` = 24 hours) |
+| Payload fields | `sub` (user ID as string), `exp` (expiry timestamp) |
+| Transport | `Authorization: Bearer <token>` header |
+
+<Warning>
+  All workers in a multi-process deployment **must share the same `SECRET_KEY`
+  and `DATABASE_URL`**. A token signed by one worker is verified by all others.
+  Generating a new `SECRET_KEY` on each deploy invalidates every active session
+  immediately. Rotate the key only deliberately, and expect all users to be
+  logged out.
+</Warning>
+
+---
+
+## Roles
+
+Every account has one of two roles, stored in the database and checked via
+FastAPI dependency injection on each route.
+
+<CardGroup cols={2}>
+  <Card title="owner" icon="store">
+    Registers at `/owner/register`. Has full access to their mess — meals,
+    subscriptions, payments, customer management, and delivery. Completely
+    isolated from other owners' data; all queries are scoped by `owner_id`.
+  </Card>
+  <Card title="customer" icon="user">
+    Joins a mess via the owner's invite link or self-registers. Can view
+    and interact only with their own subscriptions, orders, bills, and
+    delivery status within their approved mess membership.
+  </Card>
+</CardGroup>
+
+Routes that require a specific role reject the wrong role with `403 Forbidden`. Role checks happen inside the `get_current_user` dependency — there is no separate role-claim field inside the JWT payload itself; the role is looked up from the database on every request.
+
+<Note>
+  A customer whose join request is still `pending` or `declined` receives
+  `403 Forbidden` on all protected routes except `/join-status`. They can
+  log in and check their membership status but cannot access any mess data
+  until the owner approves them.
+</Note>
+
+---
+
+## Rate limiting
+
+Failed login attempts are counted in the `auth_attempt_buckets` database table, shared by all API workers. The window is 15 minutes (900 seconds).
+
+| Bucket | Limit | Key |
+|---|---|---|
+| Per account | 10 failed attempts | SHA-256 hash of the phone number |
+| Per client IP | 100 failed attempts | SHA-256 hash of the IP address |
+
+When either limit is exhausted, the API returns:
+
+```
+HTTP 429 Too Many Requests
+Retry-After: <seconds until window resets>
+```
+
+**Successful** authentication clears the per-account counter to zero. The per-IP counter is **not** cleared on success — it drains naturally when the 15-minute window expires.
+
+<Info>
+  Bucket keys store hashed identifiers — neither phone numbers nor passwords
+  are persisted in plain text in the attempts table. Client IP is taken from
+  the ASGI connection, not from forwarded headers. If you deploy behind a
+  reverse proxy, configure it to pass the real client IP via a trusted
+  header and ensure your server trusts only that proxy.
+</Info>
+
+---
+
+## OTP signup
+
+When `SIGNUP_OTP_MODE` is not `off`, new customers who self-register via the join link must verify their phone number before their account is created.
+
+<Steps>
+  <Step title="Request an OTP">
+    ```bash
+    curl -X POST https://your-backend.onrender.com/auth/signup/otp \
+      -H 'Content-Type: application/json' \
+      -d '{"phone": "9000000099", "scope": "customer_join"}'
+    ```
+
+    The response includes a `challenge_id`, a masked phone display, and
+    `expires_in` (300 seconds). In `console` mode the six-digit code is
+    printed in the backend terminal — no SMS is sent.
+  </Step>
+
+  <Step title="Verify the OTP">
+    ```bash
+    curl -X POST https://your-backend.onrender.com/auth/signup/verify-otp \
+      -H 'Content-Type: application/json' \
+      -d '{"challenge_id": "<id from previous step>", "code": "123456"}'
+    ```
+
+    A correct code returns a `verification_id`. You have 5 attempts before
+    the challenge is locked. A new OTP cannot be requested for 60 seconds
+    after the previous one (cooldown), and a maximum of 5 OTPs can be sent
+    per phone per hour.
+  </Step>
+
+  <Step title="Complete signup">
+    Pass the `verification_id` in the account creation request body. The
+    backend validates that the challenge is verified, unconsumed, unexpired,
+    and matches the phone number and scope before creating the account.
+  </Step>
+</Steps>
+
+<Tabs>
+  <Tab title="off">
+    No phone verification. Owners can register customers directly from
+    their dashboard. Customers who self-register via the join link can
+    sign up without an OTP. Suitable for demo deployments.
+  </Tab>
+  <Tab title="console">
+    OTP is printed to the Uvicorn terminal (`uvicorn.error` logger at
+    WARNING level). No SMS is sent. **Only available when `APP_ENV=development`.**
+    Used for local end-to-end testing of the signup flow.
+  </Tab>
+  <Tab title="twilio">
+    OTP is delivered via Twilio Verify SMS to the customer's phone.
+    Requires `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and
+    `TWILIO_VERIFY_SERVICE_SID` to be set. The backend prepends `+91`
+    to the 10-digit phone number before sending.
+  </Tab>
+</Tabs>
+
+---
+
+## Password requirements
+
+| Rule | Detail |
+|---|---|
+| Minimum length | 8 characters |
+| Maximum length | 72 UTF-8 bytes (bcrypt hard limit) |
+| Hashing | bcrypt via `passlib` with the `deprecated="auto"` scheme |
+| Existing passwords | Remain valid after upgrade; no forced reset |
+
+Passwords are never stored in plain text. The `verify_password_limited` function always performs a full bcrypt comparison — even for accounts that don't exist — to prevent timing-based user enumeration.
+
+---
+
+## CORS
+
+The backend allows cross-origin requests from the following origins (configured in `app/main.py`):
+
+- `http://localhost:5173` — Vite dev server
+- Any subdomain of `vercel.app` — production frontend
+
+If you deploy the frontend to a custom domain, add it to the `allow_origins` list in `main.py` and redeploy the backend.

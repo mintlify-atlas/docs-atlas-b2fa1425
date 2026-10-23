@@ -1,0 +1,143 @@
+---
+title: "Setting Up and Editing Your Public Mess Profile Page"
+sidebarTitle: "Public Profile"
+description: "Edit your mess name, address, meal timings, and contact info on your public page — visible to anyone without login at /mess/{token}."
+---
+
+Your **public mess page** is visible to anyone on the internet — no login required. It shows your mess details, live menu for the next seven days, published plan offers, and genuine customer reviews. Visitors can tap **Join this mess** to reach your registration form. This page is the first thing a potential customer sees, so filling in every field makes a strong first impression.
+
+## Accessing your public page
+
+Your public mess page lives at `/mess/{token}`, where `{token}` is your unique invite token (the same one used in your join QR). Find the direct link in the dashboard under **Your public mess page**.
+
+<CardGroup cols={2}>
+  <Card title="Public page URL" icon="globe">
+    `/mess/{token}` — no sign-in needed. Share this link anywhere.
+  </Card>
+  <Card title="Join registration form" icon="user-plus">
+    `/join/{token}` — the self-registration form customers reach by tapping **Join this mess**.
+  </Card>
+</CardGroup>
+
+<Info>
+"Public" means no sign-in is needed within your network. Visitors outside your Wi-Fi can only reach this page if you have deployed Smart Mess to a publicly accessible server or domain.
+</Info>
+
+## Fetching your profile
+
+```http
+GET /owner/mess-profile
+Authorization: Bearer <owner_token>
+```
+
+```json
+{
+  "name": "Priya's Home Kitchen",
+  "address": "42 Gandhi Nagar, Bhopal, MP 462001",
+  "contact": "+91 98765 43210 · priya@example.com",
+  "about": "Pure vegetarian home-style North Indian food since 2018.",
+  "timings": [
+    { "meal_type": "breakfast", "from_time": "07:30", "to_time": "09:00" },
+    { "meal_type": "lunch",     "from_time": "12:00", "to_time": "14:00" },
+    { "meal_type": "dinner",    "from_time": "19:00", "to_time": "21:00" }
+  ],
+  "join_token": "pQ7rT2xLmNvKwYjAcBdEfG",
+  "profile_saved": true
+}
+```
+
+## Editing profile fields
+
+Every field on the public profile is individually locked. Click the **pencil icon** next to a field to unlock it for editing. After you save, the field locks again and the value is greyed out until you click the pencil again.
+
+**Update one or more fields**
+
+```http
+PUT /owner/mess-profile
+Authorization: Bearer <owner_token>
+Content-Type: application/json
+
+{
+  "name": "Priya's Home Kitchen",
+  "address": "42 Gandhi Nagar, Bhopal, MP 462001",
+  "contact": "+91 98765 43210",
+  "about": "Pure vegetarian home-style North Indian food since 2018.",
+  "preparation": "Fresh ingredients sourced daily. No preservatives."
+}
+```
+
+Fields you omit are left unchanged. You can update a single field by including only that key in the body.
+
+<Tip>
+A successful save returns the full updated profile along with a confirmation message: `"Mess details saved. Everyone can now see them on your public page."` The `profile_saved` flag becomes `true` after the first successful save.
+</Tip>
+
+## Setting meal timings
+
+Meal timings appear on the public page and drive the `serving_ends_at` value shown in the delivery panel. Use the structured timing fields instead of the free-text `hours` field — they display more cleanly to customers.
+
+Times must be in `HH:MM` 24-hour format (the dropdown increments in 15-minute steps). The closing time must be strictly after the opening time.
+
+```json
+{
+  "timings": [
+    { "meal_type": "breakfast", "from_time": "07:30", "to_time": "09:00" },
+    { "meal_type": "lunch",     "from_time": "12:00", "to_time": "14:30" },
+    { "meal_type": "dinner",    "from_time": "19:00", "to_time": "21:00" }
+  ]
+}
+```
+
+<Note>
+Saving structured timings automatically overwrites the free-text `hours` field with a formatted summary (`Breakfast: 07:30 – 09:00` etc.). Old text-only timing entries remain visible on the public page until you save structured timings to replace them.
+</Note>
+
+<Steps>
+  <Step title="Open your public profile">
+    In the owner dashboard, click **Your public mess page** → **Edit**.
+  </Step>
+  <Step title="Unlock the timings field">
+    Click the pencil icon next to **Meal timings**.
+  </Step>
+  <Step title="Set each meal's From and To">
+    Use the breakfast, lunch, and dinner **From** / **To** dropdowns. Each increments in 15-minute steps.
+  </Step>
+  <Step title="Save">
+    Click **Save timings**. The field locks and your public page updates immediately.
+  </Step>
+</Steps>
+
+## All editable fields
+
+| Field          | Max length | Notes                                                       |
+|----------------|-----------|--------------------------------------------------------------|
+| `name`         | 100       | Displayed as the mess name everywhere. Defaults to your account name until set. |
+| `address`      | 500       | Physical address shown on the public page.                   |
+| `contact`      | 100       | Phone, email, or WhatsApp link for customer enquiries.       |
+| `about`        | 2000      | A description of your mess, food style, and values.          |
+| `preparation`  | 3000      | Details about ingredients, hygiene practices, or specialities. |
+| `timings`      | 3 entries | Structured from/to times per meal type.                      |
+
+<Warning>
+Blank fields display honest placeholder messages on the public page — for example, `"This mess hasn't added an address yet"`. Filling in every field before you share your QR gives customers the information they need to decide whether to join.
+</Warning>
+
+## What the public page displays
+
+The public page at `/mess/{token}` assembles live data from several sources:
+
+<Accordion title="Live menu">
+Published meals for today and the next six days (`/public/menu`). Customers see the menu description and AI-generated photo for each meal. No login is required to browse upcoming meals.
+</Accordion>
+
+<Accordion title="Plan offers">
+All active plan offers you have published (`/public/plans`), sorted by duration and price. Customers can browse available plans before they register.
+</Accordion>
+
+<Accordion title="Customer reviews">
+The 30 most recent ratings and comments from subscribed customers (`/public/reviews`). Only the customer's first name, star rating, and comment are shown — no phone numbers or subscription details.
+</Accordion>
+
+<Accordion title="Join link">
+A **Join this mess** button that links to `/join/{token}`. Clicking it opens the registration form where a new customer enters their name, phone number, and password.
+</Accordion>
