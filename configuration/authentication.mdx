@@ -24,7 +24,8 @@ There are two login endpoints. Both accept the same credentials and return the s
     ```json
     {
       "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-      "token_type": "bearer"
+      "token_type": "bearer",
+      "role": "owner"
     }
     ```
   </Tab>
@@ -63,7 +64,7 @@ Tokens that are expired, signed with a different `SECRET_KEY`, or otherwise inva
 | Algorithm | Set by `ALGORITHM` env var — `HS256` (default), `HS384`, or `HS512` |
 | Signing secret | `SECRET_KEY` environment variable |
 | Lifetime | `ACCESS_TOKEN_EXPIRE_MINUTES` minutes from issue (default `1440` = 24 hours) |
-| Payload fields | `sub` (user ID as string), `exp` (expiry timestamp) |
+| Payload fields | `sub` (user ID as string), `role` (`owner` or `customer`), `exp` (expiry timestamp) |
 | Transport | `Authorization: Bearer <token>` header |
 
 <Warning>
@@ -94,7 +95,7 @@ FastAPI dependency injection on each route.
   </Card>
 </CardGroup>
 
-Routes that require a specific role reject the wrong role with `403 Forbidden`. Role checks happen inside the `get_current_user` dependency — there is no separate role-claim field inside the JWT payload itself; the role is looked up from the database on every request.
+Routes that require a specific role reject the wrong role with `403 Forbidden`. Role checks happen inside the `get_current_user` dependency. The `role` claim is embedded in the JWT payload at login; the current user record is also looked up from the database on every request.
 
 <Note>
   A customer whose join request is still `pending` or `declined` receives
@@ -142,12 +143,14 @@ When `SIGNUP_OTP_MODE` is not `off`, new customers who self-register via the joi
     ```bash
     curl -X POST https://your-backend.onrender.com/auth/signup/otp \
       -H 'Content-Type: application/json' \
-      -d '{"phone": "9000000099", "scope": "customer_join"}'
+      -d '{"phone": "9000000099", "role": "customer", "join_token": "<invite-token>"}'
     ```
 
-    The response includes a `challenge_id`, a masked phone display, and
-    `expires_in` (300 seconds). In `console` mode the six-digit code is
-    printed in the backend terminal — no SMS is sent.
+    The `join_token` field is optional and required only when the customer
+    is signing up via an owner's invite link. Omit it for owner self-registration
+    (set `role` to `"owner"` instead). The response includes a `challenge_id`,
+    a masked phone display, and `expires_in` (300 seconds). In `console` mode
+    the six-digit code is printed in the backend terminal — no SMS is sent.
   </Step>
 
   <Step title="Verify the OTP">

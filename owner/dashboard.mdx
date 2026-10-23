@@ -48,6 +48,7 @@ Every Smart Mess instance starts with owner registration. Send a `POST` request 
 {
   "id": 1,
   "name": "Priya Sharma",
+  "phone": "9876543210",
   "role": "owner"
 }
 ```
@@ -74,10 +75,10 @@ The dashboard links directly to every management section. Use the sidebar or the
   <Card title="Delivery" icon="truck" href="/owner/delivery">
     Mark meals as preparing, out for delivery, or delivered.
   </Card>
-  <Card title="Reviews" icon="star">
+  <Card title="Reviews" icon="star" href="/customer/reviews">
     Read meal ratings and customer suggestions.
   </Card>
-  <Card title="AI Kitchen Advisor" icon="robot">
+  <Card title="AI Kitchen Advisor" icon="robot" href="/features/ai-kitchen-advisor">
     Get AI-powered suggestions for tomorrow's menu based on your history.
   </Card>
   <Card title="Public Profile" icon="globe" href="/owner/public-profile">

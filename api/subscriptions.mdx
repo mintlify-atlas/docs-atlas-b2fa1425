@@ -345,6 +345,40 @@ Returns all customer accounts linked to the owner's mess, including their curren
 
 ---
 
+### `POST /owner/customers`
+
+Creates a new customer account directly from the owner's dashboard and optionally sends login credentials by email. Use this when a customer does not self-register.
+
+**Auth:** Owner
+
+<ParamField body="name" type="string" required>Customer's full name (1–100 chars).</ParamField>
+<ParamField body="phone" type="string" required>10-digit mobile number. Must be unique across all accounts.</ParamField>
+<ParamField body="password" type="string" required>Initial password for the customer (8–72 chars).</ParamField>
+<ParamField body="role" type="string">Must be `customer` (the only accepted value).</ParamField>
+<ParamField body="email" type="string">Optional email address. When provided, login credentials are sent to this address automatically.</ParamField>
+
+```json Response
+{
+  "id": 18,
+  "name": "Rahul Verma",
+  "phone": "9876543210",
+  "role": "customer",
+  "email_status": "sent"
+}
+```
+
+<ResponseField name="id" type="integer">Newly created customer's user ID.</ResponseField>
+<ResponseField name="name" type="string">Customer's name as stored.</ResponseField>
+<ResponseField name="phone" type="string">Customer's phone number.</ResponseField>
+<ResponseField name="role" type="string">Always `customer`.</ResponseField>
+<ResponseField name="email_status" type="string">`sent` if credentials were emailed, `not_requested` if no email was provided, or an error string if the send failed.</ResponseField>
+
+<Warning>
+  Returns **HTTP 409** if the phone number is already registered. Returns **HTTP 422** if `role` is not `customer`.
+</Warning>
+
+---
+
 ### `POST /owner/plans`
 
 Directly assigns a subscription to a customer without going through the request flow. Creates a `pending_payment` subscription and an `IssuedBill` snapshot immediately.

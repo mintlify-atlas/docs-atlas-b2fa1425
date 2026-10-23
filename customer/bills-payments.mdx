@@ -10,7 +10,7 @@ Smart Mess does not collect money automatically — all payments flow directly b
 
 ## Your Live Bill
 
-The live bill is calculated on demand every time you open it. Call `GET /billing/current` or simply open **Bills** in the app to see the latest figures.
+The live bill is calculated on demand every time you open it. Call `GET /bills/current` or simply open **Bills** in the app to see the latest figures.
 
 <Info>
   The live bill covers your currently active subscription for today's date. If you want to check a specific plan's bill (for example a future subscription or a single-meal purchase), the endpoint accepts an optional `plan_id` query parameter.
@@ -51,7 +51,7 @@ When the owner is ready to collect payment, they generate an official bill snaps
   If the owner generates the bill a second time without any change in base amount, deductions, or extras, the system reuses the existing snapshot rather than creating a duplicate. A new dated snapshot is only created when at least one amount has changed.
 </Tip>
 
-Bill snapshots appear in the response from `GET /billing/history`. Each entry contains the month, base amount, deductions, extras total, final amount, and payment status. The 15-second in-app notification poll alerts you as soon as a new snapshot is generated.
+Bill snapshots appear in the response from `GET /bills/history`. Each entry contains the month, base amount, deductions, extras total, final amount, and payment status. The 15-second in-app notification poll alerts you as soon as a new snapshot is generated.
 
 ---
 
@@ -132,7 +132,7 @@ Each receipt record includes:
 
 <Tabs>
   <Tab title="Bill history">
-    `GET /billing/history` returns all generated bill snapshots for your account, ordered newest-first. Each snapshot shows the amounts at the moment the bill was generated — useful for comparing figures over time.
+    `GET /bills/history` returns all generated bill snapshots for your account, ordered newest-first. Each snapshot shows the amounts at the moment the bill was generated — useful for comparing figures over time.
   </Tab>
   <Tab title="Payment history">
     `GET /payments/history` returns all owner-confirmed receipts against your subscriptions and single-meal purchases, also ordered newest-first. Cross-reference with bill snapshots to reconcile your balance.

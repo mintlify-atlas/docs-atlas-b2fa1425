@@ -141,7 +141,7 @@ Run this command from the `backend` directory with the production `DATABASE_URL`
 Five isolated chat tests cover two-way messages, unread/read cursors, duplicate retries, owner and customer isolation, pending-member denial, history pagination, and additive migration preservation:
 
 ```bash
-python backend/run_tests.py --pattern test_app.py
+python backend/run_tests.py --pattern test_chat.py
 ```
 
 The frontend retry test verifies that failed drafts are preserved and duplicate retry keys stay stable across attempts.

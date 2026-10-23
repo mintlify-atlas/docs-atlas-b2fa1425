@@ -53,7 +53,7 @@ Host: 127.0.0.1:8001
 
 ## POST /auth/signup
 
-Create a new user account. The first account created **must** be an `owner` and also provides the mess name. Subsequent accounts can be customers. When `SIGNUP_OTP_MODE` is not `off`, a verified `verification_id` must be supplied.
+Create a new user account. The first account created **must** be an `owner` and also provides the mess name. Subsequent accounts can be customers. When `SIGNUP_OTP_MODE` is not `off`, a `verification_id` obtained from `POST /auth/signup/verify-otp` must be supplied.
 
 ### Request Body
 
@@ -78,7 +78,7 @@ Create a new user account. The first account created **must** be an `owner` and 
 </ParamField>
 
 <ParamField body="verification_id" type="string | null">
-  The `verification_id` (also called `challenge_id`) returned by `POST /auth/signup/otp` after OTP verification. Required when `SIGNUP_OTP_MODE` is `console` or `twilio`. Pass `null` or omit when OTP mode is `off`.
+  The `verification_id` returned by `POST /auth/signup/verify-otp` after a successful OTP check. Required when `SIGNUP_OTP_MODE` is `console` or `twilio`. Pass `null` or omit when OTP mode is `off`.
 </ParamField>
 
 ### Response — `schemas.UserOut`
@@ -128,7 +128,7 @@ Create a new user account. The first account created **must** be an `owner` and 
 }
 ```
 
-```json Success response (201)
+```json Success response (200)
 {
   "id": 1,
   "name": "Ramesh Sharma",
@@ -301,7 +301,7 @@ Host: 127.0.0.1:8001
 
 ## POST /auth/signup/otp
 
-Send a one-time password to the provided phone number. When `SIGNUP_OTP_MODE=twilio`, the code is delivered via SMS using the Twilio Verify service. When `SIGNUP_OTP_MODE=console`, the code is printed to the server console (useful for local development). Returns a `verification_id` (`challenge_id`) that must be passed to `/auth/signup/verify-otp` and ultimately to `POST /auth/signup`.
+Send a one-time password to the provided phone number. When `SIGNUP_OTP_MODE=twilio`, the code is delivered via SMS using the Twilio Verify service. When `SIGNUP_OTP_MODE=console`, the code is printed to the server console (useful for local development). Returns a `challenge_id` that must be passed to `POST /auth/signup/verify-otp`, and the resulting `verification_id` is then passed to `POST /auth/signup`.
 
 <Warning>
   Never expose `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, or `TWILIO_VERIFY_SERVICE_SID` to the frontend. These credentials must remain server-side only.
@@ -323,8 +323,34 @@ Send a one-time password to the provided phone number. When `SIGNUP_OTP_MODE=twi
 
 ### Response
 
-<ResponseField name="verification_id" type="string" required>
-  An opaque identifier (also referred to as `challenge_id` in the verify step) for this OTP challenge. Store this on the client and pass it to `POST /auth/signup/verify-otp` and then to `POST /auth/signup`.
+When `SIGNUP_OTP_MODE=off` the call succeeds immediately with `otp_required: false` and no challenge to complete. Otherwise the following fields are returned:
+
+<ResponseField name="otp_required" type="boolean" required>
+  `true` when an OTP challenge was created; `false` when `SIGNUP_OTP_MODE=off` (demo mode — no OTP needed).
+</ResponseField>
+
+<ResponseField name="challenge_id" type="string | null">
+  An opaque identifier for this OTP challenge. Store this on the client and pass it to `POST /auth/signup/verify-otp` as `challenge_id`, and then to `POST /auth/signup` as `verification_id`. `null` when `SIGNUP_OTP_MODE=off`.
+</ResponseField>
+
+<ResponseField name="masked_phone" type="string">
+  Partially masked phone number confirming delivery target (e.g. `"******3210"`). Present when OTP was sent.
+</ResponseField>
+
+<ResponseField name="expires_in" type="integer">
+  Seconds until the OTP challenge expires (300 seconds / 5 minutes).
+</ResponseField>
+
+<ResponseField name="resend_after" type="integer">
+  Seconds to wait before a new OTP can be requested for the same phone (60 seconds).
+</ResponseField>
+
+<ResponseField name="delivery" type="string">
+  OTP delivery channel: `"console"` or `"twilio"`.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable status message.
 </ResponseField>
 
 <CodeGroup>
@@ -335,9 +361,22 @@ Send a one-time password to the provided phone number. When `SIGNUP_OTP_MODE=twi
 }
 ```
 
-```json Success response (200)
+```json Success response — OTP sent (200)
 {
-  "verification_id": "chg_XkQ9aT3bLmP..."
+  "otp_required": true,
+  "challenge_id": "chg_XkQ9aT3bLmP...",
+  "masked_phone": "******3210",
+  "expires_in": 300,
+  "resend_after": 60,
+  "delivery": "twilio",
+  "message": "OTP sent to your registered mobile number."
+}
+```
+
+```json Success response — demo mode (200)
+{
+  "verification_id": null,
+  "otp_required": false
 }
 ```
 </CodeGroup>
@@ -350,8 +389,8 @@ Verify the six-digit OTP code the user received. A successful verification marks
 
 ### Request Body
 
-<ParamField body="verification_id" type="string" required>
-  The `verification_id` returned by `POST /auth/signup/otp`. Also referred to internally as `challenge_id`. Minimum 20 characters, maximum 64 characters.
+<ParamField body="challenge_id" type="string" required>
+  The `challenge_id` returned by `POST /auth/signup/otp`. Minimum 20 characters, maximum 64 characters.
 </ParamField>
 
 <ParamField body="code" type="string" required>
@@ -360,28 +399,34 @@ Verify the six-digit OTP code the user received. A successful verification marks
 
 ### Response
 
-<ResponseField name="verified" type="boolean" required>
-  `true` if the code matched the challenge and the OTP is now marked as verified. Proceed to `POST /auth/signup` with the same `verification_id`.
+<ResponseField name="verification_id" type="string" required>
+  The same challenge identifier, now marked as verified. Pass this as `verification_id` in the `POST /auth/signup` body to link the verified phone to the new account.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable confirmation message (e.g. `"Mobile number verified. Complete your registration."`).
 </ResponseField>
 
 ### Error Codes
 
 | Status | Condition |
 |---|---|
-| `400` | Code is incorrect or the challenge has expired |
-| `422` | `verification_id` too short/long, or `code` not exactly six digits |
+| `400` | Code is incorrect, the challenge has expired, or already used |
+| `429` | Too many incorrect attempts for this challenge |
+| `422` | `challenge_id` too short/long, or `code` not exactly six digits |
 
 <CodeGroup>
 ```json Request
 {
-  "verification_id": "chg_XkQ9aT3bLmP...",
+  "challenge_id": "chg_XkQ9aT3bLmP...",
   "code": "482910"
 }
 ```
 
 ```json Success response (200)
 {
-  "verified": true
+  "verification_id": "chg_XkQ9aT3bLmP...",
+  "message": "Mobile number verified. Complete your registration."
 }
 ```
 </CodeGroup>
@@ -397,10 +442,10 @@ The full OTP-gated registration sequence is:
     Call `GET /auth/signup/settings`. If `otp_required` is `false`, skip to step 4.
   </Step>
   <Step title="Request OTP">
-    Call `POST /auth/signup/otp` with the user's phone and role. Save the returned `verification_id`.
+    Call `POST /auth/signup/otp` with the user's phone and role. Save the returned `challenge_id`.
   </Step>
   <Step title="Verify OTP">
-    Call `POST /auth/signup/verify-otp` with the `verification_id` and the six-digit code. Confirm `verified: true`.
+    Call `POST /auth/signup/verify-otp` with the `challenge_id` and the six-digit code. Save the `verification_id` from the response.
   </Step>
   <Step title="Create account">
     Call `POST /auth/signup` including the `verification_id`. On success, proceed to login.
@@ -424,7 +469,7 @@ The full OTP-gated registration sequence is:
     # 3. Verify OTP (use code from SMS or server console)
     curl -X POST http://127.0.0.1:8001/auth/signup/verify-otp \
       -H "Content-Type: application/json" \
-      -d '{"verification_id": "chg_XkQ9aT3bLmP...", "code": "482910"}'
+      -d '{"challenge_id": "chg_XkQ9aT3bLmP...", "code": "482910"}'
 
     # 4. Create account
     curl -X POST http://127.0.0.1:8001/auth/signup \

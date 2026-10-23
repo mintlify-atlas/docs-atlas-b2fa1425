@@ -109,14 +109,33 @@ Saving structured timings automatically overwrites the free-text `hours` field w
 
 ## All editable fields
 
-| Field          | Max length | Notes                                                       |
-|----------------|-----------|--------------------------------------------------------------|
-| `name`         | 100       | Displayed as the mess name everywhere. Defaults to your account name until set. |
-| `address`      | 500       | Physical address shown on the public page.                   |
-| `contact`      | 100       | Phone, email, or WhatsApp link for customer enquiries.       |
-| `about`        | 2000      | A description of your mess, food style, and values.          |
-| `preparation`  | 3000      | Details about ingredients, hygiene practices, or specialities. |
-| `timings`      | 3 entries | Structured from/to times per meal type.                      |
+| Field              | Max length / values                                        | Notes                                                                      |
+|--------------------|------------------------------------------------------------|----------------------------------------------------------------------------|
+| `name`             | 100                                                        | Displayed as the mess name everywhere. Defaults to your account name until set. |
+| `address`          | 500                                                        | Physical address shown on the public page.                                 |
+| `contact`          | 100                                                        | Phone, email, or WhatsApp link for customer enquiries.                     |
+| `about`            | 2000                                                       | A description of your mess, food style, and values.                        |
+| `preparation`      | 3000                                                       | Details about ingredients, hygiene practices, or specialities.             |
+| `hours`            | 300                                                        | Free-text hours summary. Overwritten automatically when structured `timings` are saved. |
+| `timings`          | 3 entries                                                  | Structured from/to times per meal type (preferred over `hours`).           |
+| `owner_name`       | 100                                                        | Owner's display name shown on the public page.                             |
+| `tagline`          | 150                                                        | Short promotional line shown below the mess name.                          |
+| `business_type`    | 100                                                        | e.g. `Home mess`, `Tiffin service`, `Hostel mess`.                         |
+| `food_type`        | 100                                                        | e.g. `Pure veg`, `Non-veg`, `Jain`.                                        |
+| `service_type`     | 100                                                        | e.g. `Home delivery`, `Dine-in`, `Tiffin`.                                 |
+| `operating_days`   | 100                                                        | e.g. `Monday – Saturday`.                                                  |
+| `opening_time`     | `HH:MM` 24-hour or empty                                   | Overall opening time (separate from per-meal `timings`).                   |
+| `closing_time`     | `HH:MM` 24-hour or empty                                   | Overall closing time.                                                      |
+| `city`             | 100                                                        | City where the mess operates.                                              |
+| `area`             | 100                                                        | Locality or neighbourhood.                                                 |
+| `fssai_number`     | 14 digits or empty                                         | FSSAI food licence number.                                                 |
+| `business_status`  | `Active` · `Temporarily closed` · `Closed` · empty        | Operating status shown prominently on the public page.                     |
+| `latitude`         | −90 to 90                                                  | GPS latitude for directory distance search. Must be set together with `longitude`. |
+| `longitude`        | −180 to 180                                                | GPS longitude for directory distance search. Must be set together with `latitude`. |
+| `name_hi`          | 100                                                        | Mess name in Hindi for multilingual display.                               |
+| `about_hi`         | 2000                                                       | About section in Hindi.                                                    |
+| `preparation_hi`   | 3000                                                       | Preparation details in Hindi.                                              |
+| `address_hi`       | 500                                                        | Physical address in Hindi.                                                 |
 
 <Warning>
 Blank fields display honest placeholder messages on the public page — for example, `"This mess hasn't added an address yet"`. Filling in every field before you share your QR gives customers the information they need to decide whether to join.

@@ -51,10 +51,16 @@ Smart Mess is designed to be deployed with the FastAPI backend on Render and the
     |---|---|
     | `ALGORITHM` | JWT signing algorithm: `HS256` (default), `HS384`, or `HS512` |
     | `ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime in minutes (default: `1440`) |
-    | `GEMINI_API_KEY` / `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` | AI menu photo generation |
-    | `GOOGLE_TRANSLATE_API_KEY` | Runtime Hindi translation of saved descriptions |
-    | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Customer registration emails |
-    | `SIGNUP_OTP_MODE` | `off` for demo/production without SMS; `twilio` for real OTP |
+    | `SIGNUP_OTP_MODE` | `off` (no SMS), `console` (prints OTP locally), or `twilio` (real SMS) |
+    | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` | Twilio credentials when `SIGNUP_OTP_MODE=twilio` |
+    | `CLOUDFLARE_API_TOKEN` | Cloudflare Workers AI token for AI menu photo generation |
+    | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID for Workers AI |
+    | `MENU_IMAGE_MODEL` | AI image model (default: `@cf/black-forest-labs/flux-1-schnell`) |
+    | `GOOGLE_TRANSLATE_API_KEY` | Runtime Hindi translation of saved descriptions via Google Cloud Translation v2 |
+    | `TRANSLATION_DAILY_CHARACTER_LIMIT` | Max source characters translated per worker per UTC day (default: `50000`) |
+    | `TRANSLATION_REDIS_REST_URL`, `TRANSLATION_REDIS_REST_TOKEN` | Optional Upstash Redis REST cache for translations across restarts |
+    | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | SMTP credentials for customer registration emails |
+    | `CUSTOMER_LOGIN_URL` | URL sent to customers in registration emails; must be reachable from the customer's device |
 
     <Warning>
       **`SECRET_KEY` must remain stable** across all workers and every restart. Rotating it immediately invalidates every outstanding login token and any pending console OTP challenges. Do not auto-generate a new secret during each deploy.
